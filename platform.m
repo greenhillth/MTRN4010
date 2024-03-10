@@ -37,7 +37,6 @@ classdef platform < handle
             obj.lidarRegister = zeros(1, 4096);
             obj.positionRegister(:,1) = [parameters.position; 0];
             obj.index = 1;
-            obj.status = "initialised";
         end
 
         function configureParameters(obj, parameters)
@@ -59,16 +58,19 @@ classdef platform < handle
                 dataFile (1, :) char
             end
 
+            obj.updateStatus("Loading path")
             obj.loadedFile = "./datasets/" + string(dataFile);
             obj.api.b.LoadDataFile(char(obj.loadedFile));
             obj.api.b.Rst();
+            obj.updateStatus("Loaded path")
         end 
 
         function run(obj)
             obj.initialiseMenu;
+            % wait for input
+
             obj.eventLoop;
-            obj.menu.Lamp4.Color = 'red';
-            obj.plotPath(obj.menu.UIAxes);
+            obj.plotPath(obj.menu.GCFAxes);
 
 
 
@@ -76,7 +78,14 @@ classdef platform < handle
 
         function f = initialiseMenu(obj)
             obj.menu = interface();
-            f = obj.menu.UIFigure;
+            obj.menu.initialise(dir('datasets/*.mat'));
+            % 
+            % % initialise dataset selection menu  
+            % datasets = platform.getFiles('datasets/*.mat');
+            % obj.menu.ActiveFileDropDown.ItemsData = datasets;
+            % obj.menu.ActiveFileDropDown.Items = datasets;
+
+            f = obj.menu.MTRN4010ControlCentreUIFigure;
 
         end
 
@@ -106,12 +115,14 @@ classdef platform < handle
                         break;
                     case 1  %% lidar case
                         %%TODO - implement
-                        lidarScan = event.d;
-                        lidarScans = lidarScans+1;
-                        obj.lidarRegister(lidarScans) = t;
-                    case 2
-                        imu = event.d;
-                        obj.predictPose(t, imu(1)*gain, imu(2)+bias, 1);
+                            obj.updateStatus("Processing Lidar");
+                            lidarScan = event.d;
+                            lidarScans = lidarScans+1;
+                            obj.lidarRegister(lidarScans) = t;
+                        case 2
+                            obj.updateStatus("Processing IMU");
+                            imu = event.d;
+                            obj.predictPose(t, imu(1)*gain, imu(2)+bias, 1);
                     otherwise
                         
                 end
@@ -151,6 +162,7 @@ classdef platform < handle
             env = obj.api.b.GetInfo();
             hold(ax, "on");
             plot(ax, env.Context.Walls(1, :), env.Context.Walls(2, :),'LineWidth', 2, 'color', [205, 127, 50]/255);
+            obj.updateStatus("Plotting path");
             for n = 1:length(path)
                 plot(ax, path(1,1:n),path(2,1:n),'-', LineWidth=1.5, Color=[0 204 0]/255);
                 if (n>1) delete(arrow); end
@@ -193,6 +205,7 @@ classdef platform < handle
                 time (1, :) double
             end
             % Linearly interpolate trajectory for faster and more uniform plotting
+            obj.updateStatus("Interpolating data")
             data = obj.getPathVectors;
             interpolated = zeros(4, length(time)-1);
             interpolated(:, 1) = data(:, 1);
@@ -213,8 +226,11 @@ classdef platform < handle
                     currentTime];
             end
             interpolated = resize(interpolated, [4 N-1]);
-            disp('balls')
         end
+            function updateStatus(obj, status)
+                obj.status = status;
+                obj.menu.Status.Value=status;
+            end
     end
     methods (Static)
         function arr = plotArrow(ax, coords, params)
@@ -232,6 +248,13 @@ classdef platform < handle
             arrow = rotation*(outline*params.scale)+coords(1:2);
             arr = plot(ax, arrow(1, :), arrow(2,:), ...
                 'LineWidth', params.lineWidth, 'color', params.colour);
+        end
+        function files = getFiles(path)
+            contents = dir(path);
+            files = {};
+            for i=1:length(contents)
+                files{i} = contents(i).name;
+            end
         end
     end
 end
