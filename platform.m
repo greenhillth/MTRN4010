@@ -27,6 +27,7 @@ classdef platform < handle
             end
             obj.api = APImtrn4010_v02();
             obj.loadedFile = "";
+            obj.status = "initialising";
             % setting params
             p = [parameters.length, parameters.gain, parameters.bias];
             obj.params = array2table(p, "VariableNames", ["length", "gain", "bias"]);
@@ -58,27 +59,52 @@ classdef platform < handle
                 dataFile (1, :) char
             end
 
-            obj.updateStatus("Loading path")
+            %obj.updateStatus("Loading path");
             obj.loadedFile = "./datasets/" + string(dataFile);
             obj.api.b.LoadDataFile(char(obj.loadedFile));
             obj.api.b.Rst();
-            obj.updateStatus("Loaded path")
+            %obj.updateStatus("Loaded path");
         end 
 
         function run(obj)
-            obj.initialiseMenu;
-            % wait for input
+            obj.loadFile('aDataUsr_007b.mat');
+            obj.initialiseMenu();
+            % set initial pose
+            envInfo = obj.api.b.GetInfo();
+            obj.positionRegister(:, 1) = [envInfo.pose0;0];
 
+            
+            % compute cycle
             obj.eventLoop;
-            obj.plotPath(obj.menu.GCFAxes);
 
+            % interpolate DR
+            DRpathData = obj.interpolatePathVectors(obj.lidarRegister);
+            groundTruth = obj.api.b.GetGroundTruth();
+
+            OOIpoints = envInfo.Context.Landmarks;
+
+            obj.menu.loadPathData('deadReckoning', DRpathData, ...
+                'groundTruth',groundTruth(1:2, :), 'ooiCoords', OOIpoints(1:2, :));
+            obj.menu.startPlaybackSession();
+            %obj.playbackSession();
+            
+            % playback session
+            %obj.plotPath(obj.menu.GCFAxes);
+
+            %  exit
 
 
         end
 
         function f = initialiseMenu(obj)
             obj.menu = interface();
-            obj.menu.initialise(dir('datasets/*.mat'));
+            UsefulInfo = obj.api.b.GetInfo();
+            Context=UsefulInfo.Context;
+            
+            wallsData = Context.Walls;
+            obj.menu.initialise('directory', dir('datasets/*.mat'), ...
+                'walls', wallsData, ...
+                'position', obj.positionRegister(1:3, 1));
             % 
             % % initialise dataset selection menu  
             % datasets = platform.getFiles('datasets/*.mat');
@@ -88,12 +114,13 @@ classdef platform < handle
             f = obj.menu.MTRN4010ControlCentreUIFigure;
 
         end
-
+        
         function eventLoop(obj, dataFile)
             arguments
                 obj platform
                 dataFile (1, :) char = 'aDataUsr_007b.mat'
             end
+
             if ((nargin == 2) || (obj.loadedFile == "")) 
                 obj.loadFile(dataFile); % load default file if none already set
             end
@@ -104,32 +131,33 @@ classdef platform < handle
             bias = obj.params.bias;
 
             lidarScans = 0;
-
+            
             for i = 1:32000      %%TODO - change (only reading 1k events)
                 event = nextEvent();
                 t = double(event.t)*1e-4;
-
+                
                 switch (event.ty)
                     case 0  %end case
                         disp('End of event');
                         break;
                     case 1  %% lidar case
                         %%TODO - implement
-                            obj.updateStatus("Processing Lidar");
-                            lidarScan = event.d;
-                            lidarScans = lidarScans+1;
-                            obj.lidarRegister(lidarScans) = t;
-                        case 2
-                            obj.updateStatus("Processing IMU");
-                            imu = event.d;
-                            obj.predictPose(t, imu(1)*gain, imu(2)+bias, 1);
+                        obj.updateStatus("Processing Lidar");
+                        lidarScan = event.d;
+                        lidarScans = lidarScans+1;
+                        obj.lidarRegister(lidarScans) = t;
+                    case 2
+                        obj.updateStatus("Processing IMU");
+                        imu = event.d;
+                        obj.predictPose(t, imu(1)*gain, imu(2)+bias, 1);
                     otherwise
-                        
+                            
                 end
             end
+
             obj.lidarRegister = resize(obj.lidarRegister, lidarScans);
 
-
+            
 
         end
 
@@ -143,12 +171,12 @@ classdef platform < handle
             end
             t0 = obj.lastMeasuredTime;
             dt = (time - t0)/precision;
-
+            
             if obj.index+precision > length(obj.positionRegister)
                 obj.positionRegister = resize(obj.positionRegister, ...
                     [4, length(obj.positionRegister)+4096]);
             end
-            
+                
             for i = 1:precision
                 X0 = obj.lastPos();
                 computedVal = [X0(1:3)+dt*obj.kinematicModel(vt, X0(3), yaw);t0+dt*i];
@@ -156,29 +184,59 @@ classdef platform < handle
             end
         end
 
-        function plotPath(obj, ax)
-            timeArray = obj.lidarRegister;
-            path = obj.interpolatePathVectors(timeArray);
-            env = obj.api.b.GetInfo();
-            hold(ax, "on");
-            plot(ax, env.Context.Walls(1, :), env.Context.Walls(2, :),'LineWidth', 2, 'color', [205, 127, 50]/255);
+            
+        function playbackSession(obj)
+            
+            % check computed data is avaliable
+        
+            % config 
+        
+            % plot
             obj.updateStatus("Plotting path");
-            for n = 1:length(path)
-                plot(ax, path(1,1:n),path(2,1:n),'-', LineWidth=1.5, Color=[0 204 0]/255);
-                if (n>1) delete(arrow); end
-                arrow = platform.plotArrow(ax, path(1:3, n), 'lineWidth', 1.5);
-                %plot() plot arrow and instantaneous velocity?? use
-                %pol2cart - might have to modify positionRegister to
-                %include velocity
+            GCFax = obj.menu.GCFAxes;
+            env = obj.api.b.GetInfo();
+            plotPath = obj.interpolatePathVectors(obj.lidarRegister);
+            plot(GCFax, env.Context.Walls(1, :), env.Context.Walls(2, :),'LineWidth', 2, 'color', [205, 127, 50]/255);
+            hold(GCFax, "on");
+            plotObjs = gobjects(1,4);
+            for N = 1:length(plotPath)
+                plotObjs = obj.plotPath(GCFax, plotObjs, plotPath, N);
+                obj.setVisibility(plotObjs, obj.menu.Visibility);
                 pause(0.05);
             end
-            hold(ax, "off");
+            hold(GCFax, "off");
+            obj.updateStatus("Finished plotting path");
+    
+        end
+
+        function plots = plotPath(obj, ax, plotObj, path, n)
+            arguments
+                obj
+                ax
+                plotObj
+                path    (4, :) double
+                n              double
+            end
+
+            delete(plotObj(1));
+            plotObj(1) = platform.plotArrow(ax, path(1:3, n), 'lineWidth', 1.5);
+
+            plotObj(3) = plot(ax, path(1,1:n),path(2,1:n),'-', LineWidth=1.5, Color=[0 204 0]/255);
+            
+            plots = plotObj;
         end
     end
     methods (Access = private)
+        function setVisibility(obj, lines, flags)
+            for i=1:length(flags)
+                if(flags(i)) lines(i).LineStyle = '-';
+                else lines(i).LineStyle = 'none';
+                end
+            end
+        end
         function m = lastPos(obj)
             arguments
-            obj platform
+                obj platform
             end
             m = obj.positionRegister(:, obj.index);
         end
@@ -207,25 +265,25 @@ classdef platform < handle
             % Linearly interpolate trajectory for faster and more uniform plotting
             obj.updateStatus("Interpolating data")
             data = obj.getPathVectors;
-            interpolated = zeros(4, length(time)-1);
-            interpolated(:, 1) = data(:, 1);
+            interpolated = zeros(8, length(time)-1);
+            interpolated(1:4, 1) = data(:, 1);
             i = 2;
             for N = 1:length(time)
                 currentTime = time(N);
                 while (data(4, i) < currentTime) 
                     i = i+1;
                     if (i > length(data))
-                        interpolated = resize(interpolated, [4 N-1]);
+                        interpolated = resize(interpolated, [8 N]);
                         return
                     end
                 end                
                 deltat = data(4, i) - data(4, i-1);
                 m = (data(1:3, i) - data(1:3, i-1))./deltat;
-                interpolated(:,N) = [ ...
+                interpolated(:,N+1) = [ ...
                     m*(currentTime-data(4, i-1))+data(1:3, i-1);
-                    currentTime];
+                    currentTime; deltat; m];
             end
-            interpolated = resize(interpolated, [4 N-1]);
+            interpolated = resize(interpolated, [8 N]);
         end
             function updateStatus(obj, status)
                 obj.status = status;
