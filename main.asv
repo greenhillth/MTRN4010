@@ -1,0 +1,16 @@
+% 
+% car = platform();
+% 
+% car.run()
+% 
+
+load('sample lidar out.mat')
+s1 = d(:,1);
+
+r = dec2bin(bitshift(s1, -2, 'uint16'));
+j = dec2bin(d(:,1));
+
+for i=1:301
+    fprintf("r: %s, j ")
+
+end

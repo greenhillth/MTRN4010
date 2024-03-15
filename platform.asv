@@ -12,11 +12,13 @@ classdef platform < handle
         readTime (2, 1) double
         positionRegister (4, :) double
         lidarRegister (1, :) double
-        index double
+        index uint16
         status string
 
         lidarIndex uint16
+        activeLidar uint8
         pathVector (:,:)double
+        play uint16
 
     end
 
@@ -46,6 +48,7 @@ classdef platform < handle
             obj.positionRegister(:,1) = [parameters.position; 0];
             obj.index = 1;
             obj.lidarIndex = 0;
+            obj.activeLidar = 1;
         end
 
         function configureParameters(obj, parameters)
@@ -76,31 +79,60 @@ classdef platform < handle
 
         function run(obj)
             obj.loadFile('aDataUsr_007b.mat');
-
-            % get struct defining initial parameters (file, position, walls, GT, ooi) 
-            envInfo = obj.api.b.GetInfo();
-            initPos = envInfo.pose0;
-
-
             obj.initialiseMenu();
             
-            % grab and apply modified params
-            %obj.menu.
-
-
-            % set initial pose
-            obj.positionRegister(:, 1) = [initPos;0];
-
-            
-            % event cycle
-            while (obj.processEvent())
-                %pause(0.02);
-
+            % TODO - grab and apply modified params
+            while ~(obj.menu.flags.userInput)
+                pause(0.05);
             end
-            
+    
+            obj.applyParams(obj.menu.params);
+            control = 1;
 
+            % event cycle
+            while (control ~= 0)
+                control = obj.menu.control;    
+                switch (control)
+                case 1      % pause
+                    pause(0.05);
+                    continue;
+                case 2      % play
+                    finished = obj.processEvent()
+                case 3      % reset
+                    obj.reset();
+                    obj.menu.control = 1;       %s et to pause
+                end
+            end
 
         end
+
+        function reset(obj)
+            obj.menu.flags.reset = false;
+            obj.api.b.Rst();
+            obj.imuReading = [0;0];
+            obj.readTime = [0;0];
+            obj.lidarIndex = 0;
+            obj.index = 1;
+        end
+
+        function applyParams(obj, params) 
+            arguments
+                obj platform
+                params struct
+            end
+            %%TODO - implement file change func
+            if (params.fileChanged)
+                obj.loadFile(params.file);
+            end    
+            if (params.modified)
+                obj.params.gain = params.gain;
+                obj.params.bias = params.bias;
+                obj.positionRegister(:,1) = [obj.menu.params.initPos;0];
+                
+            end
+        end
+
+        
 
         function inProgress = processEvent(obj)
             
@@ -124,26 +156,38 @@ classdef platform < handle
             inProgress = true;
         end
 
-        function updatePlot(obj, vecs) 
-            % GCF Plot
-            obj.menu.updatePlotVectors(vecs, [0;0], obj.lidarIndex);
-            %Lidar plot
-
-            
+        function updatePlot(obj, GCFvecs, Lvecs) 
+            obj.menu.updatePlotVectors(GCFvecs, Lvecs, obj.lidarIndex);
         end
         
         function processLidar(obj, eventData)
-            % do lidar shit
-            % TODO - this
-        
-            % plot on interface
+            % get range and intensities of both lidars
+            theta = deg2rad(-75:0.5:75);
+            [dist, intensity] = platform.scanToRI(eventData.d');
+
+            %convert to cartesian
+            [x, y] = pol2cart([theta;theta], dist);
+
+
+            % apply cluster analysis to get OOIs
+            dL = 0.8; step = 0.5;
+            clusterFcn = obj.api.b.FindSmallSegmentsFS;
+            [ooi1, prop1, n1] = clusterFcn(dist(1, :), dL, step)
+            [ooi2, prop2, n2] = clusterFcn(dist(2, :), dL, step)
+
+            
+            propToCart
+            
+
+
+            %update plots (lidar, global and OOI)
+            Lvecs = [x(obj.activeLidar,:);y(obj.activeLidar,:);theta;dist(obj.activeLidar,:)]
+
             obj.lidarIndex = obj.lidarIndex + 1;
             computedPos = platform.predictPose([obj.readTime(2);eventData.t],...
              obj.positionRegister(1:3, obj.index), obj.imuReading, obj.kinematicModel)
 
-             obj.updatePlot(computedPos);
-
-            
+             obj.updatePlot(computedPos, Lvecs);
             % update lidar time
             obj.readTime(1) = eventData.t;
         end
@@ -179,71 +223,18 @@ classdef platform < handle
                 'Walls', env.Context.Walls, ...
                 'OOI', env.Context.Landmarks,...
                 'GT', GT, ...
-                '');
+                'Position', env.pose0);
+
+            %set initial position - mmove?
+            obj.positionRegister(:, 1) = [env.pose0;0];
 
             obj.menu.setActiveTab(obj.menu.ParameterControlTab);
             f = obj.menu.MTRN4010ControlCentreUIFigure;
 
         end
         
-        function eventLoop(obj, dataFile)
-            arguments
-                obj platform
-                dataFile (1, :) char = 'aDataUsr_007b.mat'
-            end
-
-            if ((nargin == 2) || (obj.loadedFile == "")) 
-                obj.loadFile(dataFile); % load default file if none already set
-            end
-            
-            nextEvent = obj.api.RdE;
-            imu = [0;0];
-            gain = obj.params.gain;
-            bias = obj.params.bias;
-
-            lidarScans = 0;
-            
-            for i = 1:32000      %%TODO - change (only reading 1k events)
-                event = nextEvent();
-                t = double(event.t)*1e-4;
-                
-                switch (event.ty)
-                    case 0  %end case
-                        disp('End of event');
-                        break;
-                    case 1  %% lidar case
-                        %%TODO - implement
-                        obj.updateStatus("Processing Lidar");
-                        lidarScan = event.d;
-                        lidarScans = lidarScans+1;
-                        obj.lidarRegister(lidarScans) = t;
-                    case 2
-                        obj.updateStatus("Processing IMU");
-                        imu = event.d;
-                        obj.predictPose(t, imu(1)*gain, imu(2)+bias, 1);
-                    otherwise
-                            
-                end
-            end
-
-            obj.lidarRegister = resize(obj.lidarRegister, lidarScans);
-
-            
-
-        end
-
     end
     methods (Access = private)
-
-        function m = lastPos(obj)
-            arguments
-                obj platform
-            end
-            m = obj.positionRegister(:, obj.index);
-        end
-        function t = lastMeasuredTime(obj)
-            t = obj.positionRegister(4, obj.index);
-        end
 
         function addMeasurement(obj, measurement)
             arguments
@@ -291,9 +282,8 @@ classdef platform < handle
                 obj.menu.Status.Value=status;
             end
     end
-    methods (Static)
 
-        
+    methods (Static)
         function computedVal = predictPose(time, x0, imu, model, precision)
             arguments
                 time (2, 1) uint32
@@ -312,12 +302,14 @@ classdef platform < handle
             end
         end
 
-        function files = getFiles(path)
-            contents = dir(path);
-            files = {};
-            for i=1:length(contents)
-                files{i} = contents(i).name;
+        function [range, intensity] = scanToRI(scan)
+            arguments
+                scan (2, 301) uint16;
             end
+            range = single(bitshift(bitshift(scan, 2), -2));
+            range = range.*1e-2;      % convert to m
+            intensity = uint8(bitshift(scan, -14));
+                
         end
     end
 end
