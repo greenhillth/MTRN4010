@@ -5,8 +5,8 @@ classdef interface < matlab.apps.AppBase
         MTRN4010ControlCentreUIFigure  matlab.ui.Figure
         TabGroup                       matlab.ui.container.TabGroup
         StatusTab                      matlab.ui.container.Tab
-        GridLayout                     matlab.ui.container.GridLayout
-        Panel_9                        matlab.ui.container.Panel
+        StatusGridLayout               matlab.ui.container.GridLayout
+        ErrorPanel                     matlab.ui.container.Panel
         ErrorAxes                      matlab.ui.control.UIAxes
         visibilityControl              matlab.ui.container.Panel
         ResetPlaybackButton            matlab.ui.control.Button
@@ -18,8 +18,8 @@ classdef interface < matlab.apps.AppBase
         GroundTruthSwitchLabel         matlab.ui.control.Label
         PositionIndicatorSwitch        matlab.ui.control.Switch
         PositionIndicatorSwitchLabel   matlab.ui.control.Label
-        Panel                          matlab.ui.container.Panel
-        XYLabel                        matlab.ui.control.Label
+        VelocityGaugePanel             matlab.ui.container.Panel
+        XYLabel_2                      matlab.ui.control.Label
         iVyGauge                       matlab.ui.control.SemicircularGauge
         SpeedmsGauge                   matlab.ui.control.Gauge
         SpeedmsGaugeLabel              matlab.ui.control.Label
@@ -49,24 +49,35 @@ classdef interface < matlab.apps.AppBase
         InitialisedLamp                matlab.ui.control.Lamp
         InitialisedLampLabel           matlab.ui.control.Label
         MTRN4010Assignment1ControlCentreLabel  matlab.ui.control.Label
-        GCFAxes                        matlab.ui.control.UIAxes
-        PLidarAxes                     matlab.ui.control.UIAxes
         CLidarAxes                     matlab.ui.control.UIAxes
+        PLidarAxes                     matlab.ui.control.UIAxes
+        GCFAxes                        matlab.ui.control.UIAxes
         ParameterControlTab            matlab.ui.container.Tab
-        GridLayout2                    matlab.ui.container.GridLayout
-        Panel_8                        matlab.ui.container.Panel
+        ParamGridLayout                matlab.ui.container.GridLayout
+        ParameterDisplay               matlab.ui.container.Panel
+        ApplyParametersandRunSimulationButton  matlab.ui.control.Button
+        ParamTree                      matlab.ui.container.Tree
+        ParametersNode                 matlab.ui.container.TreeNode
+        ActiveFileNode                 matlab.ui.container.TreeNode
+        CurrentActiveFile              matlab.ui.container.TreeNode
+        InitialCoordinatesNode         matlab.ui.container.TreeNode
+        CurrentInitialCoords           matlab.ui.container.TreeNode
+        IMUGainNode                    matlab.ui.container.TreeNode
+        CurrentGain                    matlab.ui.container.TreeNode
+        IMUBiasNode                    matlab.ui.container.TreeNode
+        CurrentBias                    matlab.ui.container.TreeNode
         initY                          matlab.ui.control.NumericEditField
         YEditFieldLabel                matlab.ui.control.Label
         initTheta                      matlab.ui.control.NumericEditField
         thetaEditFieldLabel            matlab.ui.control.Label
         initX                          matlab.ui.control.NumericEditField
         XEditFieldLabel                matlab.ui.control.Label
-        Panel_6                        matlab.ui.container.Panel
+        InitialPosPanel                matlab.ui.container.Panel
         initPosAxes                    matlab.ui.control.UIAxes
         Panel_5                        matlab.ui.container.Panel
         GotoStatusButton               matlab.ui.control.Button
         EXITButton_2                   matlab.ui.control.Button
-        Panel_4                        matlab.ui.container.Panel
+        IMUConfig                      matlab.ui.container.Panel
         biasSpinner                    matlab.ui.control.Spinner
         gainSpinner                    matlab.ui.control.Spinner
         IMUParametersLabel             matlab.ui.control.Label
@@ -75,6 +86,8 @@ classdef interface < matlab.apps.AppBase
         GainSlider                     matlab.ui.control.Slider
         GainSliderLabel                matlab.ui.control.Label
         Panel_2                        matlab.ui.container.Panel
+        FileLoadedLamp_2               matlab.ui.control.Lamp
+        FileLoadedLamp_2Label          matlab.ui.control.Label
         ActiveFileDropDown             matlab.ui.control.DropDown
         ActiveFileDropDownLabel        matlab.ui.control.Label
         Panel_7                        matlab.ui.container.Panel
@@ -104,13 +117,7 @@ classdef interface < matlab.apps.AppBase
     methods (Access = private)
         
         function drawInitPose(app)
-            if (isempty(app.initX.Value) || ...
-                isempty(app.initY.Value) || ...
-                isempty(app.initTheta.Value))
-                return;
-            end
-            coords = [app.initX.Value; app.initY.Value; app.InitPlot.Rads];
-            arrow = app.getArrow(coords);
+            arrow = app.getArrow(app.InitPlot.Coords);
             app.InitPlot.arrow.XData = arrow(1,:);
             app.InitPlot.arrow.YData = arrow(2,:);
             end
@@ -141,12 +148,11 @@ classdef interface < matlab.apps.AppBase
             arguments
                 app
                 data.directory
+                data.loadedFile string
                 data.Walls (2,:) double
                 data.Position (3,1) double = [0 0 0]
             end
             % init properties
-            app.PlaybackRequested = false;
-            app.PlaybackResetRequested = false;
 
             % initialise axes objects
             app.wallsData = data.Walls;
@@ -160,9 +166,9 @@ classdef interface < matlab.apps.AppBase
             walls = line(ax, data.Walls(1,:), data.Walls(2,:), ...
                 'LineWidth', 2, 'color', [205, 127, 50]/255);
             app.GCFPlot = struct( ...
-                'DRline', line(ax, [0 0], [0 0], 'Color', [0 255 0]/255, 'LineWidth', 1.5), ...
+                'DRline', line(ax, [0 0], [0 0], 'Color', [34 91 224]/255, 'LineWidth', 2, 'LineStyle', '-'), ...
                 'arrow', line(ax, [0 0], [0 0], 'Color', [255 0 0]/255, 'LineWidth', 2), ...
-                'GTLine', line(ax, [0 0], [0 0], 'Color', [186 26 26]/225, 'LineStyle', '--', 'LineWidth', 0.7),...
+                'GTLine', line(ax, [0 0], [0 0], 'Color', [224 94 34]/225, 'LineWidth', 1, 'LineStyle', ':'),...
                 'OOI', line(ax, [0 0], [0 0], 'Color', [186 26 26]/225, 'LineStyle', 'none', 'Marker', 'pentagram'), ...
                 'WallsLine', walls);
             ax = app.ErrorAxes;
@@ -173,13 +179,16 @@ classdef interface < matlab.apps.AppBase
 
             %Initial Position Display Axes
             ax = app.initPosAxes;
+            p0 = data.Position;
             walls = line(ax, data.Walls(1,:), data.Walls(2,:), ...
                 'LineWidth', 2, 'color', [205, 127, 50]/255);
-            arrow = app.getArrow([0 0 0], 'scale', 1);
+            arrow = app.getArrow(p0, 'scale', 1);
             app.InitPlot = struct( ...
                 'walls', walls, ...
-                'arrow', line(ax, arrow(1,:), arrow(2,:), 'LineStyle', 'none', 'Color', [255 0 0]/255, 'LineWidth', 2),...
-                'Rads', data.Position(3));
+                'arrow', line(ax, arrow(1,:), arrow(2,:), 'LineStyle', '-', 'Color', [255 0 0]/255, 'LineWidth', 2),...
+                'Coords', p0);
+
+            app.initX.Value = p0(1); app.initY.Value = p0(2); app.initTheta.Value = p0(3);
 
             %TODO - add lidar stuff here
 
@@ -194,6 +203,14 @@ classdef interface < matlab.apps.AppBase
             end
             app.ActiveFileDropDown.Items = files;
             app.ActiveFileDropDown.ItemsData = files;
+            app.ActiveFileDropDown.Value = cellstr(data.loadedFile);
+
+            %reflect robot state in param tree
+            app.CurrentActiveFile.Text = data.loadedFile;
+            app.CurrentInitialCoords.Text = sprintf('X: %.2f, Y:%.2f, R:%.2f', p0(1),p0(2),p0(3));
+            app.CurrentGain.Text = '1';
+            app.CurrentBias.Text = '0';
+            
 
             ready = true;
         end
@@ -255,7 +272,7 @@ classdef interface < matlab.apps.AppBase
            end
            % plot objects
            if (~exitFlag || playback == 0)
-            pause(0.05);
+            pause(0.1);
             coords = dr(:, index);
             Vt_ms = hypot(coords(6), coords(7));
             Vt_rs = coords(8);
@@ -273,7 +290,7 @@ classdef interface < matlab.apps.AppBase
             app.ErrorPlot.YErrLine.YData = dr(4, 1:index);
 
             app.iVxGauge.Value = coords(6);
-            app.iVyGauge.Value = coords(7);
+            iVyGaugepp.a.Value = coords(7);
             app.SpeedmsGauge.Value = Vt_ms;
             app.InstantaneousVelocityradssGauge.Value = Vt_rs;
 
@@ -289,6 +306,10 @@ classdef interface < matlab.apps.AppBase
             end
            end
 
+        end
+        
+        function setActiveTab(app, tab)
+            app.TabGroup.SelectedTab = tab;
         end
     end
     
@@ -330,17 +351,22 @@ classdef interface < matlab.apps.AppBase
 
         % Value changed function: initX
         function initXValueChanged(app, event)
+            app.InitPlot.Coords(1) = app.initX.Value;
             app.drawInitPose();
         end
 
         % Value changed function: initY
         function initYValueChanged(app, event)
+            app.InitPlot.Coords(2) = app.initY.Value;
             app.drawInitPose();            
         end
 
         % Value changed function: initTheta
         function initThetaValueChanged(app, event)
-            app.SwitchValueChanged;
+            rads = app.initTheta.Value;
+            if(app.Switch.Value == 'd') rads = deg2rad(rads); end
+            app.InitPlot.Coords(3) = rads;
+            app.drawInitPose();  
         end
 
         % Button pushed function: EXITButton, EXITButton_2
@@ -350,24 +376,22 @@ classdef interface < matlab.apps.AppBase
 
         % Button pushed function: SetParametersButton
         function SetParametersButtonPushed(app, event)
-            app.TabGroup.SelectedTab = app.ParameterControlTab;
+            app.setActiveTab(app.ParameterControlTab);
         end
 
         % Button pushed function: GotoStatusButton
         function GotoStatusButtonPushed(app, event)
-            app.TabGroup.SelectedTab = app.StatusTab;
+            app.setActiveTab(app.StatusTab);
         end
 
         % Value changed function: Switch
         function SwitchValueChanged(app, event)
             value = app.Switch.Value;
             if (value == 'd')
-                app.InitPlot.Rads = deg2rad(app.initTheta.Value);
+                app.initTheta.Value = rad2deg(app.InitPlot.Coords(3));
             else
-                app.InitPlot.Rads = app.initTheta.Value;
+                app.initTheta.Value = app.InitPlot.Coords(3);
             end
-            app.drawInitPose;
-
 
         end
 
@@ -430,7 +454,6 @@ classdef interface < matlab.apps.AppBase
             app.MTRN4010ControlCentreUIFigure.Position = [100 100 1115 763];
             app.MTRN4010ControlCentreUIFigure.Name = 'MTRN4010 Control Centre';
             app.MTRN4010ControlCentreUIFigure.Icon = fullfile(pathToMLAPP, 'src', 'bot.png');
-            app.MTRN4010ControlCentreUIFigure.WindowStyle = 'modal';
 
             % Create TabGroup
             app.TabGroup = uitabgroup(app.MTRN4010ControlCentreUIFigure);
@@ -440,38 +463,18 @@ classdef interface < matlab.apps.AppBase
             app.StatusTab = uitab(app.TabGroup);
             app.StatusTab.Title = 'Status';
             app.StatusTab.BackgroundColor = [1 1 1];
+            app.StatusTab.ForegroundColor = [0.129411764705882 0.129411764705882 0.129411764705882];
 
-            % Create GridLayout
-            app.GridLayout = uigridlayout(app.StatusTab);
-            app.GridLayout.ColumnWidth = {200, 165, '1x', 200};
-            app.GridLayout.RowHeight = {20, '3x', '1x', '1x', 20};
-            app.GridLayout.RowSpacing = 2.8;
-            app.GridLayout.Padding = [10 2.8 10 2.8];
-
-            % Create CLidarAxes
-            app.CLidarAxes = uiaxes(app.GridLayout);
-            title(app.CLidarAxes, 'LIDAR_1 (Cartesian)')
-            xlabel(app.CLidarAxes, 'X')
-            ylabel(app.CLidarAxes, 'Y')
-            zlabel(app.CLidarAxes, 'Z')
-            app.CLidarAxes.XGrid = 'on';
-            app.CLidarAxes.YGrid = 'on';
-            app.CLidarAxes.Layout.Row = 4;
-            app.CLidarAxes.Layout.Column = [2 3];
-
-            % Create PLidarAxes
-            app.PLidarAxes = uiaxes(app.GridLayout);
-            title(app.PLidarAxes, 'LIDAR_1 (Polar)')
-            xlabel(app.PLidarAxes, 'X')
-            ylabel(app.PLidarAxes, 'Y')
-            zlabel(app.PLidarAxes, 'Z')
-            app.PLidarAxes.XGrid = 'on';
-            app.PLidarAxes.YGrid = 'on';
-            app.PLidarAxes.Layout.Row = 3;
-            app.PLidarAxes.Layout.Column = [2 3];
+            % Create StatusGridLayout
+            app.StatusGridLayout = uigridlayout(app.StatusTab);
+            app.StatusGridLayout.ColumnWidth = {200, 165, '1x', 200};
+            app.StatusGridLayout.RowHeight = {20, '3x', '1x', '1x', 20};
+            app.StatusGridLayout.RowSpacing = 2.8;
+            app.StatusGridLayout.Padding = [10 2.8 10 2.8];
+            app.StatusGridLayout.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
 
             % Create GCFAxes
-            app.GCFAxes = uiaxes(app.GridLayout);
+            app.GCFAxes = uiaxes(app.StatusGridLayout);
             title(app.GCFAxes, 'Global Co-ordinate Frame')
             app.GCFAxes.PlotBoxAspectRatio = [1 1 1];
             app.GCFAxes.XLim = [-5 20];
@@ -487,22 +490,43 @@ classdef interface < matlab.apps.AppBase
             app.GCFAxes.Layout.Row = 2;
             app.GCFAxes.Layout.Column = 3;
 
+            % Create PLidarAxes
+            app.PLidarAxes = uiaxes(app.StatusGridLayout);
+            title(app.PLidarAxes, 'LIDAR_1 (Polar)')
+            xlabel(app.PLidarAxes, 'X')
+            ylabel(app.PLidarAxes, 'Y')
+            zlabel(app.PLidarAxes, 'Z')
+            app.PLidarAxes.XGrid = 'on';
+            app.PLidarAxes.YGrid = 'on';
+            app.PLidarAxes.Layout.Row = 3;
+            app.PLidarAxes.Layout.Column = [2 3];
+
+            % Create CLidarAxes
+            app.CLidarAxes = uiaxes(app.StatusGridLayout);
+            title(app.CLidarAxes, 'LIDAR_1 (Cartesian)')
+            xlabel(app.CLidarAxes, 'X')
+            ylabel(app.CLidarAxes, 'Y')
+            zlabel(app.CLidarAxes, 'Z')
+            app.CLidarAxes.XGrid = 'on';
+            app.CLidarAxes.YGrid = 'on';
+            app.CLidarAxes.Layout.Row = 4;
+            app.CLidarAxes.Layout.Column = [2 3];
+
             % Create MTRN4010Assignment1ControlCentreLabel
-            app.MTRN4010Assignment1ControlCentreLabel = uilabel(app.GridLayout);
+            app.MTRN4010Assignment1ControlCentreLabel = uilabel(app.StatusGridLayout);
             app.MTRN4010Assignment1ControlCentreLabel.HorizontalAlignment = 'center';
             app.MTRN4010Assignment1ControlCentreLabel.FontSize = 14;
             app.MTRN4010Assignment1ControlCentreLabel.FontWeight = 'bold';
+            app.MTRN4010Assignment1ControlCentreLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.MTRN4010Assignment1ControlCentreLabel.Layout.Row = 1;
             app.MTRN4010Assignment1ControlCentreLabel.Layout.Column = [2 3];
             app.MTRN4010Assignment1ControlCentreLabel.Text = 'MTRN4010 Assignment 1 Control Centre';
 
             % Create RobotStatusPanel
-            app.RobotStatusPanel = uipanel(app.GridLayout);
-            app.RobotStatusPanel.ForegroundColor = [0 0 0];
+            app.RobotStatusPanel = uipanel(app.StatusGridLayout);
             app.RobotStatusPanel.BorderType = 'none';
             app.RobotStatusPanel.TitlePosition = 'centertop';
             app.RobotStatusPanel.Title = 'Robot Status';
-            app.RobotStatusPanel.BackgroundColor = [0.94 0.94 0.94];
             app.RobotStatusPanel.Layout.Row = [3 4];
             app.RobotStatusPanel.Layout.Column = 4;
             app.RobotStatusPanel.FontName = 'Candara';
@@ -512,6 +536,7 @@ classdef interface < matlab.apps.AppBase
             app.InitialisedLampLabel = uilabel(app.RobotStatusPanel);
             app.InitialisedLampLabel.HorizontalAlignment = 'right';
             app.InitialisedLampLabel.FontName = 'Candara';
+            app.InitialisedLampLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.InitialisedLampLabel.Position = [103 221 53 22];
             app.InitialisedLampLabel.Text = 'Initialised';
 
@@ -523,6 +548,7 @@ classdef interface < matlab.apps.AppBase
             app.ParametersSetLampLabel = uilabel(app.RobotStatusPanel);
             app.ParametersSetLampLabel.HorizontalAlignment = 'right';
             app.ParametersSetLampLabel.FontName = 'Candara';
+            app.ParametersSetLampLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.ParametersSetLampLabel.Position = [73 176 83 22];
             app.ParametersSetLampLabel.Text = 'Parameters Set';
 
@@ -535,6 +561,7 @@ classdef interface < matlab.apps.AppBase
             app.FileLoadedLampLabel = uilabel(app.RobotStatusPanel);
             app.FileLoadedLampLabel.HorizontalAlignment = 'right';
             app.FileLoadedLampLabel.FontName = 'Candara';
+            app.FileLoadedLampLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.FileLoadedLampLabel.Position = [93 128 63 22];
             app.FileLoadedLampLabel.Text = 'File Loaded';
 
@@ -547,6 +574,7 @@ classdef interface < matlab.apps.AppBase
             app.CalculationsCompleteLampLabel = uilabel(app.RobotStatusPanel);
             app.CalculationsCompleteLampLabel.HorizontalAlignment = 'right';
             app.CalculationsCompleteLampLabel.FontName = 'Candara';
+            app.CalculationsCompleteLampLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.CalculationsCompleteLampLabel.Position = [38 81 118 22];
             app.CalculationsCompleteLampLabel.Text = 'Calculations Complete';
 
@@ -558,7 +586,9 @@ classdef interface < matlab.apps.AppBase
             % Create EXITButton
             app.EXITButton = uibutton(app.RobotStatusPanel, 'push');
             app.EXITButton.ButtonPushedFcn = createCallbackFcn(app, @EXITButtonPushed, true);
+            app.EXITButton.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
             app.EXITButton.FontWeight = 'bold';
+            app.EXITButton.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.EXITButton.Position = [52 1 100 23];
             app.EXITButton.Text = 'EXIT';
 
@@ -566,6 +596,7 @@ classdef interface < matlab.apps.AppBase
             app.PlottingLampLabel = uilabel(app.RobotStatusPanel);
             app.PlottingLampLabel.HorizontalAlignment = 'right';
             app.PlottingLampLabel.FontName = 'Candara';
+            app.PlottingLampLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.PlottingLampLabel.Position = [110 42 45 22];
             app.PlottingLampLabel.Text = 'Plotting';
 
@@ -575,10 +606,12 @@ classdef interface < matlab.apps.AppBase
             app.PlottingLamp.Color = [1 0 0];
 
             % Create ProgramStatusPanel
-            app.ProgramStatusPanel = uipanel(app.GridLayout);
+            app.ProgramStatusPanel = uipanel(app.StatusGridLayout);
+            app.ProgramStatusPanel.ForegroundColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.ProgramStatusPanel.BorderType = 'none';
             app.ProgramStatusPanel.TitlePosition = 'centertop';
             app.ProgramStatusPanel.Title = 'Program Status';
+            app.ProgramStatusPanel.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
             app.ProgramStatusPanel.Layout.Row = 4;
             app.ProgramStatusPanel.Layout.Column = 1;
 
@@ -586,6 +619,7 @@ classdef interface < matlab.apps.AppBase
             app.CurrentStatusLabel = uilabel(app.ProgramStatusPanel);
             app.CurrentStatusLabel.FontSize = 18;
             app.CurrentStatusLabel.FontWeight = 'bold';
+            app.CurrentStatusLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.CurrentStatusLabel.Position = [35 78 136 23];
             app.CurrentStatusLabel.Text = 'Current Status:';
 
@@ -596,117 +630,135 @@ classdef interface < matlab.apps.AppBase
             app.Status.HorizontalAlignment = 'center';
             app.Status.FontName = 'Lucida Console';
             app.Status.FontSize = 10;
+            app.Status.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.Status.Position = [14 39 175 25];
 
-            % Create Panel
-            app.Panel = uipanel(app.GridLayout);
-            app.Panel.BorderType = 'none';
-            app.Panel.BorderWidth = 0;
-            app.Panel.Title = ' ';
-            app.Panel.Layout.Row = 2;
-            app.Panel.Layout.Column = 4;
+            % Create VelocityGaugePanel
+            app.VelocityGaugePanel = uipanel(app.StatusGridLayout);
+            app.VelocityGaugePanel.ForegroundColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.VelocityGaugePanel.BorderType = 'none';
+            app.VelocityGaugePanel.BorderWidth = 0;
+            app.VelocityGaugePanel.Title = ' ';
+            app.VelocityGaugePanel.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
+            app.VelocityGaugePanel.Layout.Row = 2;
+            app.VelocityGaugePanel.Layout.Column = 4;
 
             % Create SetParametersButton
-            app.SetParametersButton = uibutton(app.Panel, 'push');
+            app.SetParametersButton = uibutton(app.VelocityGaugePanel, 'push');
             app.SetParametersButton.ButtonPushedFcn = createCallbackFcn(app, @SetParametersButtonPushed, true);
+            app.SetParametersButton.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
             app.SetParametersButton.FontWeight = 'bold';
+            app.SetParametersButton.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.SetParametersButton.Position = [51 9 102 23];
             app.SetParametersButton.Text = 'Set Parameters';
 
             % Create InstantaneousVelocitymsLabel
-            app.InstantaneousVelocitymsLabel = uilabel(app.Panel);
+            app.InstantaneousVelocitymsLabel = uilabel(app.VelocityGaugePanel);
             app.InstantaneousVelocitymsLabel.HorizontalAlignment = 'center';
             app.InstantaneousVelocitymsLabel.WordWrap = 'on';
             app.InstantaneousVelocitymsLabel.FontWeight = 'bold';
-            app.InstantaneousVelocitymsLabel.Position = [56 339 90 57];
+            app.InstantaneousVelocitymsLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.InstantaneousVelocitymsLabel.Position = [56 344 90 57];
             app.InstantaneousVelocitymsLabel.Text = {'Instantaneous '; '    Velocity    (m/s)'};
 
             % Create iVxGauge
-            app.iVxGauge = uigauge(app.Panel, 'semicircular');
+            app.iVxGauge = uigauge(app.VelocityGaugePanel, 'semicircular');
             app.iVxGauge.Limits = [-2 2];
             app.iVxGauge.MajorTicks = [-2 -1 0 1 2];
             app.iVxGauge.Orientation = 'east';
             app.iVxGauge.ScaleDirection = 'counterclockwise';
-            app.iVxGauge.Position = [4 255 73 136];
+            app.iVxGauge.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.iVxGauge.Position = [4 260 73 136];
 
             % Create PlayButton
-            app.PlayButton = uibutton(app.Panel, 'state');
+            app.PlayButton = uibutton(app.VelocityGaugePanel, 'state');
             app.PlayButton.ValueChangedFcn = createCallbackFcn(app, @PlayButtonValueChanged, true);
             app.PlayButton.Icon = fullfile(pathToMLAPP, 'src', 'play.png');
             app.PlayButton.Text = 'Play';
+            app.PlayButton.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
+            app.PlayButton.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.PlayButton.Position = [53 54 100 23];
             app.PlayButton.Value = true;
 
             % Create PausedLabel
-            app.PausedLabel = uilabel(app.Panel);
+            app.PausedLabel = uilabel(app.VelocityGaugePanel);
             app.PausedLabel.HorizontalAlignment = 'center';
+            app.PausedLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.PausedLabel.Position = [79 32 46 22];
             app.PausedLabel.Text = 'Paused';
 
             % Create Button
-            app.Button = uibutton(app.Panel, 'push');
+            app.Button = uibutton(app.VelocityGaugePanel, 'push');
             app.Button.Icon = fullfile(pathToMLAPP, 'src', 'fast-forward.png');
+            app.Button.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
+            app.Button.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.Button.Position = [155 54 27 23];
             app.Button.Text = '';
 
             % Create Button_2
-            app.Button_2 = uibutton(app.Panel, 'push');
+            app.Button_2 = uibutton(app.VelocityGaugePanel, 'push');
             app.Button_2.Icon = fullfile(pathToMLAPP, 'src', 'fast-backward.png');
+            app.Button_2.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
+            app.Button_2.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.Button_2.Position = [24 54 27 23];
             app.Button_2.Text = '';
 
             % Create PlaybackSpeedLabel
-            app.PlaybackSpeedLabel = uilabel(app.Panel);
+            app.PlaybackSpeedLabel = uilabel(app.VelocityGaugePanel);
             app.PlaybackSpeedLabel.HorizontalAlignment = 'center';
+            app.PlaybackSpeedLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.PlaybackSpeedLabel.Position = [25 79 95 22];
             app.PlaybackSpeedLabel.Text = 'Playback Speed:';
 
             % Create InstantaneousVelocityradssGaugeLabel
-            app.InstantaneousVelocityradssGaugeLabel = uilabel(app.Panel);
+            app.InstantaneousVelocityradssGaugeLabel = uilabel(app.VelocityGaugePanel);
             app.InstantaneousVelocityradssGaugeLabel.HorizontalAlignment = 'center';
             app.InstantaneousVelocityradssGaugeLabel.WordWrap = 'on';
             app.InstantaneousVelocityradssGaugeLabel.FontWeight = 'bold';
+            app.InstantaneousVelocityradssGaugeLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.InstantaneousVelocityradssGaugeLabel.Position = [11 150 180 22];
             app.InstantaneousVelocityradssGaugeLabel.Text = 'Instantaneous Velocity (rads/s)';
 
             % Create InstantaneousVelocityradssGauge
-            app.InstantaneousVelocityradssGauge = uigauge(app.Panel, 'linear');
+            app.InstantaneousVelocityradssGauge = uigauge(app.VelocityGaugePanel, 'linear');
             app.InstantaneousVelocityradssGauge.Limits = [-3.14 3.14];
+            app.InstantaneousVelocityradssGauge.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.InstantaneousVelocityradssGauge.Position = [4 110 197 41];
 
             % Create SpeedmsGaugeLabel
-            app.SpeedmsGaugeLabel = uilabel(app.Panel);
+            app.SpeedmsGaugeLabel = uilabel(app.VelocityGaugePanel);
             app.SpeedmsGaugeLabel.HorizontalAlignment = 'center';
             app.SpeedmsGaugeLabel.FontWeight = 'bold';
+            app.SpeedmsGaugeLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.SpeedmsGaugeLabel.Position = [64 268 73 22];
             app.SpeedmsGaugeLabel.Text = 'Speed (m/s)';
 
             % Create SpeedmsGauge
-            app.SpeedmsGauge = uigauge(app.Panel, 'circular');
+            app.SpeedmsGauge = uigauge(app.VelocityGaugePanel, 'circular');
             app.SpeedmsGauge.Limits = [0 2];
+            app.SpeedmsGauge.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.SpeedmsGauge.Position = [56 180 92 92];
 
             % Create iVyGauge
-            app.iVyGauge = uigauge(app.Panel, 'semicircular');
+            app.iVyGauge = uigauge(app.VelocityGaugePanel, 'semicircular');
             app.iVyGauge.Limits = [-2 2];
             app.iVyGauge.MajorTicks = [-2 -1 0 1 2];
             app.iVyGauge.Orientation = 'west';
-            app.iVyGauge.Position = [126 255 73 136];
+            app.iVyGauge.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.iVyGauge.Position = [126 260 73 136];
 
-            % Create XYLabel
-            app.XYLabel = uilabel(app.Panel);
-            app.XYLabel.HorizontalAlignment = 'center';
-            app.XYLabel.FontWeight = 'bold';
-            app.XYLabel.Position = [81 312 41 22];
-            app.XYLabel.Text = 'X      Y';
+            % Create XYLabel_2
+            app.XYLabel_2 = uilabel(app.VelocityGaugePanel);
+            app.XYLabel_2.HorizontalAlignment = 'center';
+            app.XYLabel_2.FontWeight = 'bold';
+            app.XYLabel_2.Position = [85 317 31 22];
+            app.XYLabel_2.Text = 'X   Y';
 
             % Create visibilityControl
-            app.visibilityControl = uipanel(app.GridLayout);
-            app.visibilityControl.ForegroundColor = [0 0 0];
+            app.visibilityControl = uipanel(app.StatusGridLayout);
             app.visibilityControl.BorderType = 'none';
             app.visibilityControl.TitlePosition = 'centertop';
             app.visibilityControl.Title = 'Visibility Control';
-            app.visibilityControl.BackgroundColor = [0.94 0.94 0.94];
             app.visibilityControl.Layout.Row = 2;
             app.visibilityControl.Layout.Column = 2;
             app.visibilityControl.FontWeight = 'bold';
@@ -715,6 +767,7 @@ classdef interface < matlab.apps.AppBase
             % Create PositionIndicatorSwitchLabel
             app.PositionIndicatorSwitchLabel = uilabel(app.visibilityControl);
             app.PositionIndicatorSwitchLabel.HorizontalAlignment = 'center';
+            app.PositionIndicatorSwitchLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.PositionIndicatorSwitchLabel.Position = [88 237 97 22];
             app.PositionIndicatorSwitchLabel.Text = 'Position Indicator';
 
@@ -722,12 +775,14 @@ classdef interface < matlab.apps.AppBase
             app.PositionIndicatorSwitch = uiswitch(app.visibilityControl, 'slider');
             app.PositionIndicatorSwitch.ItemsData = {'off', 'on'};
             app.PositionIndicatorSwitch.ValueChangedFcn = createCallbackFcn(app, @UpdateVis, true);
+            app.PositionIndicatorSwitch.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.PositionIndicatorSwitch.Position = [113 274 45 20];
             app.PositionIndicatorSwitch.Value = 'on';
 
             % Create GroundTruthSwitchLabel
             app.GroundTruthSwitchLabel = uilabel(app.visibilityControl);
             app.GroundTruthSwitchLabel.HorizontalAlignment = 'center';
+            app.GroundTruthSwitchLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.GroundTruthSwitchLabel.Position = [99 160 76 22];
             app.GroundTruthSwitchLabel.Text = 'Ground Truth';
 
@@ -735,6 +790,7 @@ classdef interface < matlab.apps.AppBase
             app.GroundTruthSwitch = uiswitch(app.visibilityControl, 'slider');
             app.GroundTruthSwitch.ItemsData = {'off', 'on'};
             app.GroundTruthSwitch.ValueChangedFcn = createCallbackFcn(app, @UpdateVis, true);
+            app.GroundTruthSwitch.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.GroundTruthSwitch.Position = [113 197 45 20];
             app.GroundTruthSwitch.Value = 'on';
 
@@ -742,6 +798,7 @@ classdef interface < matlab.apps.AppBase
             app.DeadReckoningEstimateLabel = uilabel(app.visibilityControl);
             app.DeadReckoningEstimateLabel.HorizontalAlignment = 'center';
             app.DeadReckoningEstimateLabel.WordWrap = 'on';
+            app.DeadReckoningEstimateLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.DeadReckoningEstimateLabel.Position = [83 79 108 33];
             app.DeadReckoningEstimateLabel.Text = 'Dead Reckoning Estimate';
 
@@ -749,12 +806,14 @@ classdef interface < matlab.apps.AppBase
             app.DeadReckoningEstimateSwitch = uiswitch(app.visibilityControl, 'slider');
             app.DeadReckoningEstimateSwitch.ItemsData = {'off', 'on'};
             app.DeadReckoningEstimateSwitch.ValueChangedFcn = createCallbackFcn(app, @UpdateVis, true);
+            app.DeadReckoningEstimateSwitch.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.DeadReckoningEstimateSwitch.Position = [113 120 45 20];
             app.DeadReckoningEstimateSwitch.Value = 'on';
 
             % Create OOIsSwitchLabel
             app.OOIsSwitchLabel = uilabel(app.visibilityControl);
             app.OOIsSwitchLabel.HorizontalAlignment = 'center';
+            app.OOIsSwitchLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.OOIsSwitchLabel.Position = [120 7 35 22];
             app.OOIsSwitchLabel.Text = 'OOI''s';
 
@@ -762,24 +821,25 @@ classdef interface < matlab.apps.AppBase
             app.OOIsSwitch = uiswitch(app.visibilityControl, 'slider');
             app.OOIsSwitch.ItemsData = {'off', 'on'};
             app.OOIsSwitch.ValueChangedFcn = createCallbackFcn(app, @UpdateVis, true);
+            app.OOIsSwitch.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.OOIsSwitch.Position = [113 44 45 20];
             app.OOIsSwitch.Value = 'on';
 
             % Create ResetPlaybackButton
             app.ResetPlaybackButton = uibutton(app.visibilityControl, 'push');
             app.ResetPlaybackButton.ButtonPushedFcn = createCallbackFcn(app, @ResetPlaybackButtonPushed, true);
+            app.ResetPlaybackButton.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
+            app.ResetPlaybackButton.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.ResetPlaybackButton.Position = [87 314 100 23];
             app.ResetPlaybackButton.Text = 'Reset Playback';
 
-            % Create Panel_9
-            app.Panel_9 = uipanel(app.GridLayout);
-            app.Panel_9.ForegroundColor = [0 0 0];
-            app.Panel_9.BackgroundColor = [0.94 0.94 0.94];
-            app.Panel_9.Layout.Row = [2 3];
-            app.Panel_9.Layout.Column = 1;
+            % Create ErrorPanel
+            app.ErrorPanel = uipanel(app.StatusGridLayout);
+            app.ErrorPanel.Layout.Row = [2 3];
+            app.ErrorPanel.Layout.Column = 1;
 
             % Create ErrorAxes
-            app.ErrorAxes = uiaxes(app.Panel_9);
+            app.ErrorAxes = uiaxes(app.ErrorPanel);
             title(app.ErrorAxes, 'Measured Error')
             zlabel(app.ErrorAxes, 'Z')
             subtitle(app.ErrorAxes, ' in D.R Approximation')
@@ -799,15 +859,16 @@ classdef interface < matlab.apps.AppBase
             app.ParameterControlTab = uitab(app.TabGroup);
             app.ParameterControlTab.Title = 'Parameter Control';
             app.ParameterControlTab.BackgroundColor = [1 1 1];
+            app.ParameterControlTab.ForegroundColor = [0.129411764705882 0.129411764705882 0.129411764705882];
 
-            % Create GridLayout2
-            app.GridLayout2 = uigridlayout(app.ParameterControlTab);
-            app.GridLayout2.ColumnWidth = {10, 70, '0.1x', 70, '0.1x', 70, '0.15x', '1x', 350};
-            app.GridLayout2.RowHeight = {160, '1x', 25, 20, 225};
+            % Create ParamGridLayout
+            app.ParamGridLayout = uigridlayout(app.ParameterControlTab);
+            app.ParamGridLayout.ColumnWidth = {10, 70, '0.1x', 70, '0.1x', 70, '0.15x', '1x', 350};
+            app.ParamGridLayout.RowHeight = {160, '1x', 25, 20, 225};
+            app.ParamGridLayout.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
 
             % Create Panel_7
-            app.Panel_7 = uipanel(app.GridLayout2);
-            app.Panel_7.ForegroundColor = [0 0 0];
+            app.Panel_7 = uipanel(app.ParamGridLayout);
             app.Panel_7.BorderType = 'none';
             app.Panel_7.BackgroundColor = [0.9412 0.9412 0.9412];
             app.Panel_7.Layout.Row = [3 4];
@@ -818,22 +879,22 @@ classdef interface < matlab.apps.AppBase
             app.Switch.Items = {'r', 'd'};
             app.Switch.ValueChangedFcn = createCallbackFcn(app, @SwitchValueChanged, true);
             app.Switch.FontSize = 8;
+            app.Switch.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.Switch.Position = [346 7 20 45];
             app.Switch.Value = 'r';
 
             % Create degreeradsLabel
             app.degreeradsLabel = uilabel(app.Panel_7);
             app.degreeradsLabel.WordWrap = 'on';
+            app.degreeradsLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.degreeradsLabel.Interpreter = 'latex';
             app.degreeradsLabel.Position = [371 9 25 34];
             app.degreeradsLabel.Text = {'\degree'; 'rads'};
 
             % Create Panel_2
-            app.Panel_2 = uipanel(app.GridLayout2);
-            app.Panel_2.ForegroundColor = [0 0 0];
+            app.Panel_2 = uipanel(app.ParamGridLayout);
             app.Panel_2.BorderType = 'none';
             app.Panel_2.BorderWidth = 0;
-            app.Panel_2.BackgroundColor = [0.94 0.94 0.94];
             app.Panel_2.Layout.Row = 1;
             app.Panel_2.Layout.Column = [1 7];
 
@@ -842,98 +903,116 @@ classdef interface < matlab.apps.AppBase
             app.ActiveFileDropDownLabel.HorizontalAlignment = 'center';
             app.ActiveFileDropDownLabel.FontSize = 14;
             app.ActiveFileDropDownLabel.FontWeight = 'bold';
-            app.ActiveFileDropDownLabel.Position = [29 92 290 22];
+            app.ActiveFileDropDownLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.ActiveFileDropDownLabel.Position = [29 115 290 22];
             app.ActiveFileDropDownLabel.Text = 'Active File';
 
             % Create ActiveFileDropDown
             app.ActiveFileDropDown = uidropdown(app.Panel_2);
-            app.ActiveFileDropDown.Position = [29 69 297 22];
+            app.ActiveFileDropDown.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.ActiveFileDropDown.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
+            app.ActiveFileDropDown.Position = [29 92 297 22];
 
-            % Create Panel_4
-            app.Panel_4 = uipanel(app.GridLayout2);
-            app.Panel_4.ForegroundColor = [0 0 0];
-            app.Panel_4.BorderType = 'none';
-            app.Panel_4.BackgroundColor = [0.94 0.94 0.94];
-            app.Panel_4.Layout.Row = 5;
-            app.Panel_4.Layout.Column = [1 7];
+            % Create FileLoadedLamp_2Label
+            app.FileLoadedLamp_2Label = uilabel(app.Panel_2);
+            app.FileLoadedLamp_2Label.HorizontalAlignment = 'right';
+            app.FileLoadedLamp_2Label.Position = [114 44 68 22];
+            app.FileLoadedLamp_2Label.Text = 'File Loaded';
+
+            % Create FileLoadedLamp_2
+            app.FileLoadedLamp_2 = uilamp(app.Panel_2);
+            app.FileLoadedLamp_2.Position = [197 44 20 20];
+
+            % Create IMUConfig
+            app.IMUConfig = uipanel(app.ParamGridLayout);
+            app.IMUConfig.BorderType = 'none';
+            app.IMUConfig.Layout.Row = 5;
+            app.IMUConfig.Layout.Column = [1 7];
 
             % Create GainSliderLabel
-            app.GainSliderLabel = uilabel(app.Panel_4);
+            app.GainSliderLabel = uilabel(app.IMUConfig);
             app.GainSliderLabel.HorizontalAlignment = 'right';
+            app.GainSliderLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.GainSliderLabel.Position = [26 113 30 22];
             app.GainSliderLabel.Text = 'Gain';
 
             % Create GainSlider
-            app.GainSlider = uislider(app.Panel_4);
+            app.GainSlider = uislider(app.IMUConfig);
             app.GainSlider.Limits = [0.01 10];
             app.GainSlider.ValueChangingFcn = createCallbackFcn(app, @GainSliderValueChanging, true);
+            app.GainSlider.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.GainSlider.Position = [77 135 150 3];
             app.GainSlider.Value = 1;
 
             % Create BiasSliderLabel
-            app.BiasSliderLabel = uilabel(app.Panel_4);
+            app.BiasSliderLabel = uilabel(app.IMUConfig);
             app.BiasSliderLabel.HorizontalAlignment = 'right';
+            app.BiasSliderLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.BiasSliderLabel.Position = [26 45 28 22];
             app.BiasSliderLabel.Text = 'Bias';
 
             % Create BiasSlider
-            app.BiasSlider = uislider(app.Panel_4);
+            app.BiasSlider = uislider(app.IMUConfig);
             app.BiasSlider.Limits = [-3.14159265358979 3.14159265358979];
             app.BiasSlider.ValueChangingFcn = createCallbackFcn(app, @BiasSliderValueChanging, true);
+            app.BiasSlider.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.BiasSlider.Position = [77 67 150 3];
 
             % Create IMUParametersLabel
-            app.IMUParametersLabel = uilabel(app.Panel_4);
+            app.IMUParametersLabel = uilabel(app.IMUConfig);
             app.IMUParametersLabel.FontWeight = 'bold';
+            app.IMUParametersLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.IMUParametersLabel.Position = [112 170 96 22];
             app.IMUParametersLabel.Text = 'IMU Parameters';
 
             % Create gainSpinner
-            app.gainSpinner = uispinner(app.Panel_4);
+            app.gainSpinner = uispinner(app.IMUConfig);
             app.gainSpinner.Step = 0.05;
             app.gainSpinner.ValueChangingFcn = createCallbackFcn(app, @gainSpinnerValueChanging, true);
             app.gainSpinner.Limits = [0.01 10];
+            app.gainSpinner.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.gainSpinner.Position = [251 114 100 22];
             app.gainSpinner.Value = 1;
 
             % Create biasSpinner
-            app.biasSpinner = uispinner(app.Panel_4);
+            app.biasSpinner = uispinner(app.IMUConfig);
             app.biasSpinner.Step = 0.0174533;
             app.biasSpinner.ValueChangingFcn = createCallbackFcn(app, @biasSpinnerValueChanging, true);
             app.biasSpinner.Limits = [-3.14159265358979 3.14159265358979];
+            app.biasSpinner.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.biasSpinner.Position = [251 45 100 22];
 
             % Create Panel_5
-            app.Panel_5 = uipanel(app.GridLayout2);
-            app.Panel_5.ForegroundColor = [0 0 0];
-            app.Panel_5.BackgroundColor = [0.94 0.94 0.94];
+            app.Panel_5 = uipanel(app.ParamGridLayout);
             app.Panel_5.Layout.Row = 5;
             app.Panel_5.Layout.Column = 9;
 
             % Create EXITButton_2
             app.EXITButton_2 = uibutton(app.Panel_5, 'push');
             app.EXITButton_2.ButtonPushedFcn = createCallbackFcn(app, @EXITButtonPushed, true);
+            app.EXITButton_2.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
             app.EXITButton_2.FontWeight = 'bold';
+            app.EXITButton_2.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.EXITButton_2.Position = [230 16 100 23];
             app.EXITButton_2.Text = 'EXIT';
 
             % Create GotoStatusButton
             app.GotoStatusButton = uibutton(app.Panel_5, 'push');
             app.GotoStatusButton.ButtonPushedFcn = createCallbackFcn(app, @GotoStatusButtonPushed, true);
+            app.GotoStatusButton.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
             app.GotoStatusButton.FontWeight = 'bold';
+            app.GotoStatusButton.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.GotoStatusButton.Position = [231 48 100 23];
             app.GotoStatusButton.Text = 'Go to Status';
 
-            % Create Panel_6
-            app.Panel_6 = uipanel(app.GridLayout2);
-            app.Panel_6.ForegroundColor = [0 0 0];
-            app.Panel_6.BorderType = 'none';
-            app.Panel_6.BackgroundColor = [0.94 0.94 0.94];
-            app.Panel_6.Layout.Row = 2;
-            app.Panel_6.Layout.Column = [1 7];
+            % Create InitialPosPanel
+            app.InitialPosPanel = uipanel(app.ParamGridLayout);
+            app.InitialPosPanel.BorderType = 'none';
+            app.InitialPosPanel.Layout.Row = 2;
+            app.InitialPosPanel.Layout.Column = [1 7];
 
             % Create initPosAxes
-            app.initPosAxes = uiaxes(app.Panel_6);
+            app.initPosAxes = uiaxes(app.InitialPosPanel);
             title(app.initPosAxes, 'Initial Position')
             xlabel(app.initPosAxes, 'X')
             ylabel(app.initPosAxes, 'Y')
@@ -950,66 +1029,115 @@ classdef interface < matlab.apps.AppBase
             app.initPosAxes.Position = [1 16 375 233];
 
             % Create XEditFieldLabel
-            app.XEditFieldLabel = uilabel(app.GridLayout2);
+            app.XEditFieldLabel = uilabel(app.ParamGridLayout);
             app.XEditFieldLabel.HorizontalAlignment = 'center';
             app.XEditFieldLabel.FontWeight = 'bold';
             app.XEditFieldLabel.FontAngle = 'italic';
+            app.XEditFieldLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.XEditFieldLabel.Layout.Row = 4;
             app.XEditFieldLabel.Layout.Column = 2;
             app.XEditFieldLabel.Text = 'X';
 
             % Create initX
-            app.initX = uieditfield(app.GridLayout2, 'numeric');
+            app.initX = uieditfield(app.ParamGridLayout, 'numeric');
             app.initX.AllowEmpty = 'on';
             app.initX.ValueChangedFcn = createCallbackFcn(app, @initXValueChanged, true);
             app.initX.HorizontalAlignment = 'center';
+            app.initX.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.initX.Layout.Row = 3;
             app.initX.Layout.Column = 2;
             app.initX.Value = [];
 
             % Create thetaEditFieldLabel
-            app.thetaEditFieldLabel = uilabel(app.GridLayout2);
+            app.thetaEditFieldLabel = uilabel(app.ParamGridLayout);
             app.thetaEditFieldLabel.HorizontalAlignment = 'center';
             app.thetaEditFieldLabel.FontWeight = 'bold';
             app.thetaEditFieldLabel.FontAngle = 'italic';
+            app.thetaEditFieldLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.thetaEditFieldLabel.Layout.Row = 4;
             app.thetaEditFieldLabel.Layout.Column = 6;
             app.thetaEditFieldLabel.Interpreter = 'latex';
             app.thetaEditFieldLabel.Text = '\theta';
 
             % Create initTheta
-            app.initTheta = uieditfield(app.GridLayout2, 'numeric');
+            app.initTheta = uieditfield(app.ParamGridLayout, 'numeric');
             app.initTheta.AllowEmpty = 'on';
             app.initTheta.ValueChangedFcn = createCallbackFcn(app, @initThetaValueChanged, true);
             app.initTheta.HorizontalAlignment = 'center';
+            app.initTheta.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.initTheta.Layout.Row = 3;
             app.initTheta.Layout.Column = 6;
             app.initTheta.Value = [];
 
             % Create YEditFieldLabel
-            app.YEditFieldLabel = uilabel(app.GridLayout2);
+            app.YEditFieldLabel = uilabel(app.ParamGridLayout);
             app.YEditFieldLabel.HorizontalAlignment = 'center';
             app.YEditFieldLabel.FontWeight = 'bold';
             app.YEditFieldLabel.FontAngle = 'italic';
+            app.YEditFieldLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.YEditFieldLabel.Layout.Row = 4;
             app.YEditFieldLabel.Layout.Column = 4;
             app.YEditFieldLabel.Text = 'Y';
 
             % Create initY
-            app.initY = uieditfield(app.GridLayout2, 'numeric');
+            app.initY = uieditfield(app.ParamGridLayout, 'numeric');
             app.initY.AllowEmpty = 'on';
             app.initY.ValueChangedFcn = createCallbackFcn(app, @initYValueChanged, true);
             app.initY.HorizontalAlignment = 'center';
+            app.initY.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.initY.Layout.Row = 3;
             app.initY.Layout.Column = 4;
             app.initY.Value = [];
 
-            % Create Panel_8
-            app.Panel_8 = uipanel(app.GridLayout2);
-            app.Panel_8.ForegroundColor = [0 0 0];
-            app.Panel_8.BackgroundColor = [0.94 0.94 0.94];
-            app.Panel_8.Layout.Row = [1 2];
-            app.Panel_8.Layout.Column = 8;
+            % Create ParameterDisplay
+            app.ParameterDisplay = uipanel(app.ParamGridLayout);
+            app.ParameterDisplay.Layout.Row = [1 5];
+            app.ParameterDisplay.Layout.Column = 8;
+
+            % Create ParamTree
+            app.ParamTree = uitree(app.ParameterDisplay);
+            app.ParamTree.Position = [28 368 271 303];
+
+            % Create ParametersNode
+            app.ParametersNode = uitreenode(app.ParamTree);
+            app.ParametersNode.Text = 'Parameters';
+
+            % Create ActiveFileNode
+            app.ActiveFileNode = uitreenode(app.ParametersNode);
+            app.ActiveFileNode.Text = 'Active File';
+
+            % Create CurrentActiveFile
+            app.CurrentActiveFile = uitreenode(app.ActiveFileNode);
+            app.CurrentActiveFile.Text = 'Node';
+
+            % Create InitialCoordinatesNode
+            app.InitialCoordinatesNode = uitreenode(app.ParametersNode);
+            app.InitialCoordinatesNode.Text = 'Initial Co-ordinates';
+
+            % Create CurrentInitialCoords
+            app.CurrentInitialCoords = uitreenode(app.InitialCoordinatesNode);
+            app.CurrentInitialCoords.Text = 'Node';
+
+            % Create IMUGainNode
+            app.IMUGainNode = uitreenode(app.ParametersNode);
+            app.IMUGainNode.Text = 'IMU Gain';
+
+            % Create CurrentGain
+            app.CurrentGain = uitreenode(app.IMUGainNode);
+            app.CurrentGain.Text = 'Node';
+
+            % Create IMUBiasNode
+            app.IMUBiasNode = uitreenode(app.ParametersNode);
+            app.IMUBiasNode.Text = 'IMU Bias';
+
+            % Create CurrentBias
+            app.CurrentBias = uitreenode(app.IMUBiasNode);
+            app.CurrentBias.Text = 'Node';
+
+            % Create ApplyParametersandRunSimulationButton
+            app.ApplyParametersandRunSimulationButton = uibutton(app.ParameterDisplay, 'push');
+            app.ApplyParametersandRunSimulationButton.Position = [55 57 219 47];
+            app.ApplyParametersandRunSimulationButton.Text = 'Apply Parameters and Run Simulation';
 
             % Show the figure after all components are created
             app.MTRN4010ControlCentreUIFigure.Visible = 'on';

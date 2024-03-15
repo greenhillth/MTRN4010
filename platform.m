@@ -8,10 +8,15 @@ classdef platform < handle
         loadedFile string
         params table
         kinematicModel function_handle
+        imuReading (2, 1) double
+        readTime (2, 1) double
         positionRegister (4, :) double
         lidarRegister (1, :) double
         index double
         status string
+
+        lidarIndex uint16
+        pathVector (:,:)double
 
     end
 
@@ -32,12 +37,15 @@ classdef platform < handle
             p = [parameters.length, parameters.gain, parameters.bias];
             obj.params = array2table(p, "VariableNames", ["length", "gain", "bias"]);
             obj.kinematicModel = parameters.kinematicModel;
+            obj.imuReading = [0;0];
+            obj.readTime = [0;0];
 
             % initialising remaining fields
             obj.positionRegister = zeros(4, 4096);
             obj.lidarRegister = zeros(1, 4096);
             obj.positionRegister(:,1) = [parameters.position; 0];
             obj.index = 1;
+            obj.lidarIndex = 0;
         end
 
         function configureParameters(obj, parameters)
@@ -60,21 +68,32 @@ classdef platform < handle
             end
 
             %obj.updateStatus("Loading path");
-            obj.loadedFile = "./datasets/" + string(dataFile);
-            obj.api.b.LoadDataFile(char(obj.loadedFile));
+            obj.loadedFile = string(dataFile);
+            obj.api.b.LoadDataFile(char("./datasets/" + obj.loadedFile));
             obj.api.b.Rst();
             %obj.updateStatus("Loaded path");
         end 
 
         function run(obj)
             obj.loadFile('aDataUsr_007b.mat');
-            obj.initialiseMenu();
-            % set initial pose
+
+            % get struct defining initial parameters (file, position) 
             envInfo = obj.api.b.GetInfo();
-            obj.positionRegister(:, 1) = [envInfo.pose0;0];
+            initPos = envInfo.pose0;
+            obj.initialiseMenu('file', obj.loadedFile, 'initPos', initPos);
+            
+            % grab and apply modified params
+            %obj.menu.
+
+
+            % set initial pose
+            obj.positionRegister(:, 1) = [initPos;0];
 
             
             % compute cycle
+            while (obj.processEvent())
+
+            end
             obj.eventLoop;
 
             % interpolate DR
@@ -96,21 +115,108 @@ classdef platform < handle
 
         end
 
-        function f = initialiseMenu(obj)
+        function inProgress = processEvent(obj)
+            
+            nextEvent = obj.api.RdE;
+            event = nextEvent();
+
+
+            t = double(event.t)*1e-4;
+            
+            switch (event.ty)
+                case 0  % end case
+                    disp('End of event');
+                    inProgress = false;
+                    
+                    return;
+                case 1  % lidar case
+                    %%TODO - implement
+                    obj.updateStatus("Processing Lidar");
+                    
+                    obj.processLidar(event.d);
+                    obj.plotJawn();
+                    lidarScan = event.d;
+                    lidarScans = lidarScans+1;
+                    obj.lidarRegister(lidarScans) = t;
+                case 2
+                    obj.updateStatus("Processing IMU");
+                    obj.processIMU(event);
+                otherwise
+                        
+            end
+
+
+            
+            inProgress = true;
+            
+            
+        end
+
+        function plotJawn(obj, vecs) 
+            % GCF Plot
+            obj.menu.updatePathVectors(vecs, [0;0], obj.lidarIndex);
+            %Lidar plot
+
+            
+        end
+        
+        function processLidar(obj, eventData)
+            % do lidar shit
+            
+            
+            
+            % plot on interface
+            obj.lidarIndex = obj.lidarIndex + 1;
+            computedPos = platform.predictBalls([obj.readTime(2);event.t],...
+             obj.positionRegister(1:3, obj.index), obj.imuReading, obj.kinematicModel);
+
+            obj.plotJawn(computedPos);
+
+            
+            % update lidar time
+            obj.readTime(1) = event.t;
+        end
+
+        function processIMU(obj, eventData)
+            % add IMU reading to register
+            imu = eventData.d;
+            obj.imuReading = [
+                imu(1)*obj.params.gain;
+                imu(2)+obj.params.bias];
+
+            % generate pose estimate and store in position register
+            computedPos = platform.predictBalls([obj.readTime(2);event.t],...
+             obj.positionRegister(1:3, obj.index), obj.imuReading, obj.kinematicModel);
+            
+            obj.addMeasurement(computedPos(1:4));
+
+            % update imu read time
+            obj.readTime(2) = event.t;
+
+        end
+
+        function f = initialiseMenu(obj, params)
+            arguments
+                obj platform
+                params.file string = 'aDataUsr_007b.mat'
+                params.initPos (3,1) double = [0;0;0]
+            end
             obj.menu = interface();
             UsefulInfo = obj.api.b.GetInfo();
             Context=UsefulInfo.Context;
             
             wallsData = Context.Walls;
             obj.menu.initialise('directory', dir('datasets/*.mat'), ...
+                'loadedFile', params.file, ...
                 'walls', wallsData, ...
-                'position', obj.positionRegister(1:3, 1));
+                'position', params.initPos);
             % 
             % % initialise dataset selection menu  
             % datasets = platform.getFiles('datasets/*.mat');
             % obj.menu.ActiveFileDropDown.ItemsData = datasets;
             % obj.menu.ActiveFileDropDown.Items = datasets;
 
+            obj.menu.setActiveTab(obj.menu.ParameterControlTab);
             f = obj.menu.MTRN4010ControlCentreUIFigure;
 
         end
@@ -184,28 +290,8 @@ classdef platform < handle
             end
         end
 
-            
         function playbackSession(obj)
             
-            % check computed data is avaliable
-        
-            % config 
-        
-            % plot
-            obj.updateStatus("Plotting path");
-            GCFax = obj.menu.GCFAxes;
-            env = obj.api.b.GetInfo();
-            plotPath = obj.interpolatePathVectors(obj.lidarRegister);
-            plot(GCFax, env.Context.Walls(1, :), env.Context.Walls(2, :),'LineWidth', 2, 'color', [205, 127, 50]/255);
-            hold(GCFax, "on");
-            plotObjs = gobjects(1,4);
-            for N = 1:length(plotPath)
-                plotObjs = obj.plotPath(GCFax, plotObjs, plotPath, N);
-                obj.setVisibility(plotObjs, obj.menu.Visibility);
-                pause(0.05);
-            end
-            hold(GCFax, "off");
-            obj.updateStatus("Finished plotting path");
     
         end
 
@@ -291,22 +377,26 @@ classdef platform < handle
             end
     end
     methods (Static)
-        function arr = plotArrow(ax, coords, params)
-        arguments
-            ax
-            coords (3,1) double
-            params.scale double = 1
-            params.lineWidth double = 1
-            params.colour (1,3) double = [255 14 14]/255
+
+        
+        function computedVal = predictBalls(time, x0, imu, model, precision)
+            arguments
+                time (2, 1) uint32
+                x0 (3, 1) double
+                imu (2, 1) double
+                model function_handle
+                precision double = 1
+            end
+            time = double(time)*1e-4;
+            t0 = time(1);
+            dt = (time(2) - t0)/precision;
+                
+            for i = 1:precision
+                m = model(imu(1), x0(3), imu(2));
+                computedVal = [x0(1:3)+dt*m;t0+dt*i;dt*i;m];
+            end
         end
-            outline = [1, -.5, -.5, 1, 0;
-                       0, -.5, .5, 0, 0];
-            rotation = [cos(coords(3)) -sin(coords(3)); 
-                        sin(coords(3)) cos(coords(3))];
-            arrow = rotation*(outline*params.scale)+coords(1:2);
-            arr = plot(ax, arrow(1, :), arrow(2,:), ...
-                'LineWidth', params.lineWidth, 'color', params.colour);
-        end
+
         function files = getFiles(path)
             contents = dir(path);
             files = {};
