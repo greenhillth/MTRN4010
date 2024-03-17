@@ -8,6 +8,7 @@ classdef platform < handle
         loadedFile string
         params struct
         kinematicModel function_handle
+        observer (3,1) double
         imuReading (2, 1) double
         readTime (2, 1) double
         positionRegister (4, :) double
@@ -16,6 +17,7 @@ classdef platform < handle
         status string
 
         scannedOOIs (2,:) double
+        expectedOOIs (2,:) double
 
         currentPose (3,1) double
         lidarIndex uint16
@@ -51,6 +53,8 @@ classdef platform < handle
             obj.index = 1;
             obj.lidarIndex = 0;
             obj.activeLidar = 1;
+
+            obj.expectedOOIs = double.empty(2, 0);
         end
 
         function configureParameters(obj, parameters)
@@ -91,9 +95,11 @@ classdef platform < handle
     
             obj.applyParams(obj.menu.params);
             control = 1;
+            frame = 0;
             tic;
             % event cycle
             while (control ~= 0)
+                frame = frame+1;
                 obj.menu.ProcessStep.Value = toc*1e3;
                 tic;
                 control = obj.menu.control;    
@@ -106,6 +112,16 @@ classdef platform < handle
                 case 3      % reset
                     obj.reset();
                     obj.menu.control = 1;       %s et to pause
+                end
+                if (frame == 16)         % do the data thing every 16 ticks
+                    frame = 0;
+                    [desired, actual, ~] = obj.associateScans(); 
+                    [pose, valid] = obj.EstimatePoseD(desired, actual);
+
+                    % update pose using corrected position
+                    if(valid)
+                    obj.positionRegister(obj.index - 1) = [pose; obj.readTime(1)]
+                    end
                 end
             end
 
@@ -306,7 +322,26 @@ classdef platform < handle
                 obj.scannedOOIs = cat(2, obj.scannedOOIs, scan);
                 added = false;
             end
-            balls = obj.scannedOOIs
+        end
+
+        % get transformation matrix
+        function [expected, actual, delta] = associateScans(obj)
+            % - get list of landmarks from scanned OOIS
+            
+            dist = pdist2(obj.expectedOOIs', obj.scannedOOIs', 'fasteuclidean');
+            
+            tol = 1;    %tolerance of euclidean distance
+            [exIndex, scanIndex] = find(dist<tol);
+            expected = obj.expectedOOIs(:,exIndex);
+            actual = obj.scannedOOIs(:, scanIndex);
+            delta = transpose(dist(sub2ind(size(dist),exIndex, scanIndex)));
+
+        end
+
+        function [pose, valid] = EstimatePoseD(obj, desiredPoints, actualPoints)
+            tform = estgeotform2d(desiredPoints', actualPoints', "affine");
+            pose = tform.A*obj.currentPose;
+            valid = isempty(pose);
         end
 
         function f = initialiseMenu(obj)
@@ -331,6 +366,7 @@ classdef platform < handle
             %set initial position - mmove?
             obj.positionRegister(:, 1) = [env.pose0;0];
             obj.params.lidarPose = lidarPose; 
+            obj.expectedOOIs = env.Context.Landmarks;
 
             % set initial lidars
 
