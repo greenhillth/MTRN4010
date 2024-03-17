@@ -19,6 +19,10 @@ classdef interface < matlab.apps.AppBase
         PositionIndicatorSwitch        matlab.ui.control.Switch
         PositionIndicatorSwitchLabel   matlab.ui.control.Label
         VelocityGaugePanel             matlab.ui.container.Panel
+        tTextArea_2Label               matlab.ui.control.Label
+        t                              matlab.ui.control.TextArea
+        step                           matlab.ui.control.TextArea
+        stepTextAreaLabel              matlab.ui.control.Label
         XYLabel_2                      matlab.ui.control.Label
         iVyGauge                       matlab.ui.control.SemicircularGauge
         SpeedmsGauge                   matlab.ui.control.Gauge
@@ -28,12 +32,14 @@ classdef interface < matlab.apps.AppBase
         PlaybackSpeedLabel             matlab.ui.control.Label
         Button_2                       matlab.ui.control.Button
         Button                         matlab.ui.control.Button
-        PausedLabel                    matlab.ui.control.Label
-        PlayButton                     matlab.ui.control.StateButton
+        PlayingLabel                   matlab.ui.control.Label
+        PauseButton                    matlab.ui.control.StateButton
         iVxGauge                       matlab.ui.control.SemicircularGauge
         InstantaneousVelocitymsLabel   matlab.ui.control.Label
         SetParametersButton            matlab.ui.control.Button
         ProgramStatusPanel             matlab.ui.container.Panel
+        ProcessStep                    matlab.ui.control.NumericEditField
+        ProcessStepTimemsEditFieldLabel  matlab.ui.control.Label
         Status                         matlab.ui.control.TextArea
         CurrentStatusLabel             matlab.ui.control.Label
         RobotStatusPanel               matlab.ui.container.Panel
@@ -49,13 +55,27 @@ classdef interface < matlab.apps.AppBase
         InitialisedLamp                matlab.ui.control.Lamp
         InitialisedLampLabel           matlab.ui.control.Label
         MTRN4010Assignment1ControlCentreLabel  matlab.ui.control.Label
-        CLidarAxes                     matlab.ui.control.UIAxes
-        PLidarAxes                     matlab.ui.control.UIAxes
         GCFAxes                        matlab.ui.control.UIAxes
+        PLidarAxes                     matlab.ui.control.UIAxes
+        CLidarAxes                     matlab.ui.control.UIAxes
         ParameterControlTab            matlab.ui.container.Tab
         ParamGridLayout                matlab.ui.container.GridLayout
+        lidarConfigPanel               matlab.ui.container.Panel
+        degreeradsLabel_2              matlab.ui.control.Label
+        lidarY                         matlab.ui.control.NumericEditField
+        YEditFieldLabel_2              matlab.ui.control.Label
+        lidarTheta                     matlab.ui.control.NumericEditField
+        thetaEditFieldLabel_2          matlab.ui.control.Label
+        lidarX                         matlab.ui.control.NumericEditField
+        XEditFieldLabel_2              matlab.ui.control.Label
+        degRadSelector                 matlab.ui.control.RockerSwitch
+        Panel_8                        matlab.ui.container.Panel
+        Image                          matlab.ui.control.Image
+        relativetoplatformcoordinatesystemLabel  matlab.ui.control.Label
+        LidarInitialPositionLabel      matlab.ui.control.Label
         ParameterDisplay               matlab.ui.container.Panel
-        ApplyParametersandRunSimulationButton  matlab.ui.control.Button
+        ResetParamsButton              matlab.ui.control.Button
+        applyAndRun                    matlab.ui.control.Button
         ParamTree                      matlab.ui.container.Tree
         ParametersNode                 matlab.ui.container.TreeNode
         ActiveFileNode                 matlab.ui.container.TreeNode
@@ -112,6 +132,9 @@ classdef interface < matlab.apps.AppBase
         ErrorPlot struct
         
 
+        flags struct  % Description
+        params struct
+        control uint16
     end
     
     methods (Access = private)
@@ -135,10 +158,66 @@ classdef interface < matlab.apps.AppBase
             arrow = rotation*(outline*params.scale)+coords(1:2);
         end
         
-        %TODO - remove
-        function wallObj = drawWalls(app, ax)
-            wallObj = plot(ax, app.wallsData(1,:), app.wallsData(2,:), ...
-                'LineWidth', 2, 'color', [205, 127, 50]/255);
+        function flagParamChange(app)
+            app.flags.paramsChanged = true;
+            app.ResetParamsButton.Enable="on";
+        end
+        
+        function writeParams(app)
+            app.params.initPos = app.InitPlot.Coords;
+            app.params.bias = app.BiasSlider.Value;
+            app.params.gain = app.GainSlider.Value;
+            app.params.file = app.ActiveFileDropDown.Value;
+
+            app.ResetParamsButton.Enable="off";
+            app.params.modified = true; 
+            
+        end
+
+        function setGauges(app, t, i, dx, dy, dz, speed)
+            arguments
+                app
+                t double = 0
+                i uint16 = 0
+                dx double = 0
+                dy double = 0
+                dz double = 0
+                speed double = 0
+            end
+            app.t.Value = string(t);
+            app.step.Value = string(i);
+            app.iVxGauge.Value = dx;
+            app.iVyGauge.Value = dy;
+            app.InstantaneousVelocityradssGauge.Value = dz;
+            app.SpeedmsGauge.Value = speed;
+        end
+
+        function clearPlots(app)
+            delete(app.GCFPlot.DRline);
+            app.GCFPlot.DRline = animatedline(app.GCFAxes, 'Color', [34 91 224]/255, 'LineWidth', 2, 'LineStyle', '-');
+            
+            arrow = app.getArrow(app.InitPlot.Coords);
+            app.GCFPlot.arrow.XData = arrow(1,:);
+            app.GCFPlot.arrow.YData = arrow(2,:);
+        end
+        
+        function togglePausePlay(app, isPause)
+            pathToMLAPP = fileparts(mfilename('fullpath'));
+            if (~isPause)
+                app.PauseButton.Value = false;
+                app.PauseButton.Icon = fullfile(pathToMLAPP, 'src', 'pause.png');
+                app.PauseButton.Text = 'Pause';
+                app.control = 2; % set to play
+                app.PlayingLabel.Text = 'Playing';
+            else
+
+                app.PauseButton.Value = true;
+                app.PauseButton.Icon = fullfile(pathToMLAPP, 'src', 'play.png');
+                app.PauseButton.Text = 'Play';
+                app.control = 1; % set to pause
+                app.PlayingLabel.Text = 'Paused';
+            end
+            
         end
     end
     
@@ -150,32 +229,41 @@ classdef interface < matlab.apps.AppBase
                 data.directory
                 data.loadedFile string
                 data.Walls (2,:) double
-                data.Position (3,1) double = [0 0 0]
+                data.OOI (2,:) double
+                data.GT (3,:) double
+                data.Position (3,1) double = [0;0;0]
+                data.LidarPos (3,1) double = [0;0;0]
             end
             % init properties
+            app.flags = struct('userInput', false,...
+                'paramsChanged', false);
 
             % initialise axes objects
             app.wallsData = data.Walls;
             %GCF Axes
             app.pathData = struct('deadReckoning', zeros(8,1), ...
-                'groundTruth', zeros(2,1), ...
-                'ooiCoords', zeros(2, 1), ...
+                'groundTruth', data.GT, ...
+                'ooiCoords', data.OOI, ...
                 'error', zeros(2,1), ...
-                'initialised', false);
+                'initialised', true);
+
             ax = app.GCFAxes;
             walls = line(ax, data.Walls(1,:), data.Walls(2,:), ...
                 'LineWidth', 2, 'color', [205, 127, 50]/255);
+            OOI = line(ax, data.OOI(1,:), data.OOI(2,:), 'Color', [186 26 26]/225, 'LineStyle', 'none', 'Marker', 'pentagram');
+            GT = line(ax, data.GT(1,:), data.GT(2,:), 'Color', [224 94 34]/225, 'LineWidth', 1, 'LineStyle', ':');
+
             app.GCFPlot = struct( ...
-                'DRline', line(ax, [0 0], [0 0], 'Color', [34 91 224]/255, 'LineWidth', 2, 'LineStyle', '-'), ...
-                'arrow', line(ax, [0 0], [0 0], 'Color', [255 0 0]/255, 'LineWidth', 2), ...
-                'GTLine', line(ax, [0 0], [0 0], 'Color', [224 94 34]/225, 'LineWidth', 1, 'LineStyle', ':'),...
-                'OOI', line(ax, [0 0], [0 0], 'Color', [186 26 26]/225, 'LineStyle', 'none', 'Marker', 'pentagram'), ...
+                'DRline', animatedline(ax, 'Color', [34 91 224]/255, 'LineWidth', 2, 'LineStyle', '-'), ...
+                'arrow', line(ax, 0, 0, 'Color', [255 0 0]/255, 'LineWidth', 2), ...
+                'GTLine', GT,...
+                'OOI', OOI, ...
                 'WallsLine', walls);
             ax = app.ErrorAxes;
             app.ErrorPlot = struct( ...
-                'XErrLine', line(ax, [0 0], [0 0], 'Color', [104 91 207]/255, 'LineWidth', 1.5), ...
-                'YErrLine', line(ax, [0 0], [0 0], 'Color', [219 166 92]/255, 'LineWidth', 1.5), ...
-                'origin', xline(ax, 0, 'Color',[212 212 212]/255, 'LineStyle','--'));
+                'XErrLine', animatedline(ax, 'Color', [104 91 207]/255, 'LineWidth', 1.5, 'DisplayName', 'X Err'), ...
+                'YErrLine', animatedline(ax, 'Color', [219 166 92]/255, 'LineWidth', 1.5,  'DisplayName', 'Y Err'));
+            legend(app.ErrorAxes, 'Location','north', 'Orientation','horizontal');
 
             %Initial Position Display Axes
             ax = app.initPosAxes;
@@ -191,6 +279,12 @@ classdef interface < matlab.apps.AppBase
             app.initX.Value = p0(1); app.initY.Value = p0(2); app.initTheta.Value = p0(3);
 
             %TODO - add lidar stuff here
+            init = zeros(301, 1);
+            app.LidarPlot = struct(...
+                'cart', line(app.CLidarAxes, init, init, 'LineStyle', 'none', 'Marker', '.','Color', [34 91 224]/225, 'MarkerSize', 6),...
+                'pol', line(app.PLidarAxes, init, init, 'LineStyle', 'none', 'Marker', '.', 'Color', [34 91 224]/225, 'MarkerSize', 6),...
+                'OOI', line(app.PLidarAxes, 'Color', [186 26 26]/225, 'LineStyle', 'none', 'Marker', 'pentagram'), ...
+                'initCoords', [0;0;0]);
 
             app.playbackController = struct('option', 0, 'updateVis', false, 'tickRate', 0.05);
 
@@ -210,6 +304,17 @@ classdef interface < matlab.apps.AppBase
             app.CurrentInitialCoords.Text = sprintf('X: %.2f, Y:%.2f, R:%.2f', p0(1),p0(2),p0(3));
             app.CurrentGain.Text = '1';
             app.CurrentBias.Text = '0';
+
+            app.params = struct(...
+                'modified', false, ...
+                'initPos', p0, ...
+                'initLidar', 0,...
+                'gain', app.gainSpinner.Value, ...
+                'bias', app.biasSpinner.Value, ...
+                'fileChanged', false,...
+                'file', app.ActiveFileDropDown.Value);
+
+            app.control = 2;
             
 
             ready = true;
@@ -218,14 +323,11 @@ classdef interface < matlab.apps.AppBase
         function loadPathData(app, data)
             arguments
                 app
-                data.deadReckoning   (8,:) double
                 data.groundTruth     (2,:) double = [0;0]
                 data.ooiCoords       (2,:) double = [0;0]
             end
-            app.pathData.deadReckoning = data.deadReckoning;
 
             app.pathData.groundTruth = data.groundTruth;
-            app.pathData.error = (data.groundTruth(:,:) - data.deadReckoning(1:2, :));
 
             app.GCFPlot.GTLine.XData = data.groundTruth(1,:);
             app.GCFPlot.GTLine.YData = data.groundTruth(2,:);
@@ -237,7 +339,7 @@ classdef interface < matlab.apps.AppBase
             app.pathData.initialised = true;
             
         end
-        function startPlaybackSession(app) %move to private later
+        function startPlaybackSession(app) %delete later
             % check path data loaded
             if ~(app.pathData.initialised) return; end;
            index = 1; app.playbackController.option = 0; exitFlag = false;
@@ -311,54 +413,121 @@ classdef interface < matlab.apps.AppBase
         function setActiveTab(app, tab)
             app.TabGroup.SelectedTab = tab;
         end
+        
+        function initialisePlotVectors(app, initCoords)
+            arguments
+                app
+                initCoords (2,1) double
+            end
+            initial = initCoords.*ones(2,2048);
+            app.GCFPlot.DRline.XData = initial(1,:);
+            app.GCFPlot.DRline.YData = initial(2,:);
+        end
+
+        function results = updatePlotVectors(app, drCoords, lCoords, index)
+            arguments
+                app
+                drCoords (8,1) double
+                lCoords (4, 301) double
+                index uint16
+            end
+            Vt_ms = hypot(drCoords(6), drCoords(7));
+
+            arrow = app.getArrow(drCoords(1:3));
+            app.GCFPlot.arrow.XData = arrow(1,:);
+            app.GCFPlot.arrow.YData = arrow(2,:);
+
+            app.LidarPlot.cart.XData = lCoords(1,:);
+            app.LidarPlot.cart.YData = lCoords(2,:);
+            app.LidarPlot.pol.XData = rad2deg(lCoords(3,:));
+            app.LidarPlot.pol.YData = lCoords(4,:);
+
+            err = app.pathData.groundTruth(1:2, index) - drCoords(1:2);
+            
+            % plot dead reckoning path
+            addpoints(app.GCFPlot.DRline, drCoords(1),drCoords(2));
+            
+            % plot error path 
+            %% Currently DISABLED as is using wayyyy too
+            % much process time, look into optimisations??
+            %addpoints(app.ErrorPlot.XErrLine, err(1), drCoords(4));
+            %addpoints(app.ErrorPlot.YErrLine, err(2), drCoords(4));
+            
+            drawnow;
+            %app.GCFPlot.DRline.YData(index:end) = drCoords(2);
+
+            % app.ErrorPlot.XErrLine.XData = er(1, 1:index);
+            % app.ErrorPlot.YErrLine.XData = er(2, 1:index);
+            % app.ErrorPlot.XErrLine.YData = drCoords(4, 1:index);
+            % app.ErrorPlot.YErrLine.YData = drCoords(4, 1:index);
+            
+            app.setGauges(drCoords(4), index, drCoords(6), drCoords(7), drCoords(8), Vt_ms);
+            
+        end
+
+        function params = getParams(app)
+            if (~app.flags.paramsChanged)
+                params = struct('modified', false); 
+                return;
+            end
+
+        end
+        
+        
+        function updateLidarOOIs(app, OOIs)
+            arguments
+                app
+                OOIs (2,:) double;
+            end
+            app.LidarPlot.OOI.XData = OOIs(1,:);
+            app.LidarPlot.OOI.YData = OOIs(2,:);
+        end
     end
     
 
     % Callbacks that handle component events
     methods (Access = private)
 
-        % Callback function
-        function AmplitudeSliderValueChanged(app, event)
-            value = app.AmplitudeSlider.Value;
-            plot(app.GCFAxes, value*peaks)
-            app.GCFAxes.YLim = [-1000, 1000];
-            
-        end
-
         % Value changing function: gainSpinner
         function gainSpinnerValueChanging(app, event)
             changingValue = event.Value;
             app.GainSlider.Value = changingValue;
+            app.flagParamChange();
         end
 
         % Value changing function: biasSpinner
         function biasSpinnerValueChanging(app, event)
             changingValue = event.Value;
             app.BiasSlider.Value = changingValue;
+            app.flagParamChange();
         end
 
         % Value changing function: GainSlider
         function GainSliderValueChanging(app, event)
             changingValue = event.Value;
             app.gainSpinner.Value = changingValue;
+            app.flagParamChange();
         end
 
         % Value changing function: BiasSlider
         function BiasSliderValueChanging(app, event)
             changingValue = event.Value;
             app.biasSpinner.Value = changingValue;
+            app.flagParamChange();
         end
 
         % Value changed function: initX
         function initXValueChanged(app, event)
             app.InitPlot.Coords(1) = app.initX.Value;
             app.drawInitPose();
+            app.flagParamChange();
         end
 
         % Value changed function: initY
         function initYValueChanged(app, event)
             app.InitPlot.Coords(2) = app.initY.Value;
-            app.drawInitPose();            
+            app.drawInitPose();
+            app.flagParamChange();
         end
 
         % Value changed function: initTheta
@@ -366,7 +535,8 @@ classdef interface < matlab.apps.AppBase
             rads = app.initTheta.Value;
             if(app.Switch.Value == 'd') rads = deg2rad(rads); end
             app.InitPlot.Coords(3) = rads;
-            app.drawInitPose();  
+            app.drawInitPose();
+            app.flagParamChange();
         end
 
         % Button pushed function: EXITButton, EXITButton_2
@@ -412,30 +582,101 @@ classdef interface < matlab.apps.AppBase
 
         % Button pushed function: ResetPlaybackButton
         function ResetPlaybackButtonPushed(app, event)
-            app.playbackController.option = 5;
+            app.clearPlots();
+
+            %set to pause
+            app.togglePausePlay(true);
+            
+            %clear gauges
+            app.setGauges();
+
+            
+            app.control = 3;
+
         end
 
-        % Value changed function: DeadReckoningEstimateSwitch, 
-        % ...and 3 other components
-        function UpdateVis(app, event)
-            app.playbackController.updateVis = true;
+        % Value changed function: PauseButton
+        function PauseButtonValueChanged(app, event)
+            value = app.PauseButton.Value;
+            app.togglePausePlay(value);
         end
 
-        % Value changed function: PlayButton
-        function PlayButtonValueChanged(app, event)
-            value = app.PlayButton.Value;
-            pathToMLAPP = fileparts(mfilename('fullpath'));
-            if (~value)
-                app.PlayButton.Icon = fullfile(pathToMLAPP, 'src', 'pause.png');
-                app.PlayButton.Text = 'Pause';
-                app.playbackController.option = 1; % set to play
-                app.PausedLabel.Text = 'Playing';
-            else
-                app.PlayButton.Icon = fullfile(pathToMLAPP, 'src', 'play.png');
-                app.PlayButton.Text = 'Play';
-                app.playbackController.option = 0; % set to pause
-                app.PausedLabel.Text = 'Paused';
-            end
+        % Button pushed function: applyAndRun
+        function applyAndRunPushed(app, event)
+            % change button appearance
+                app.applyAndRun.Enable = "off";
+                app.applyAndRun.Text = 'Running...';
+            % write temp params to param object
+            app.writeParams();
+            % flag params ready for bot
+            app.flags.userInput = true;
+            app.flags.paramsChanged = true;
+
+            % switch to view page
+            app.setActiveTab(app.StatusTab);
+        end
+
+        % Button pushed function: ResetParamsButton
+        function ResetParamsButtonPushed(app, event)
+
+            p0 = app.params.initPos;
+            app.initX.Value = p0(1); app.initY.Value = p0(2); app.initTheta.Value = p0(3);
+            app.InitPlot.Coords = p0;
+            app.biasSpinner.Value = app.params.bias; app.BiasSlider.Value = app.params.bias;
+            app.gainSpinner.Value = app.params.gain; app.GainSlider.Value = app.params.gain;
+            app.ActiveFileDropDown.Value = app.params.file;
+            app.params.fileChanged = false;
+
+            app.ResetParamsButton.Enable="off";
+            app.drawInitPose();
+
+
+            app.params.modified = false;
+        end
+
+        % Value changed function: ActiveFileDropDown
+        function ActiveFileDropDownValueChanged(app, event)
+            value = app.ActiveFileDropDown.Value;
+            app.params.fileChanged = true;
+            app.flagParamChange();
+        end
+
+        % Value changed function: PositionIndicatorSwitch
+        function PositionIndicatorSwitchValueChanged(app, event)
+            set(app.GCFPlot.arrow, 'Visible', app.PositionIndicatorSwitch.Value);
+        end
+
+        % Value changed function: GroundTruthSwitch
+        function GroundTruthSwitchValueChanged(app, event)
+            set(app.GCFPlot.GTLine, 'Visible', app.GroundTruthSwitch.Value);
+        end
+
+        % Value changed function: DeadReckoningEstimateSwitch
+        function DeadReckoningEstimateSwitchValueChanged(app, event)
+            set(app.GCFPlot.DRline, 'Visible', app.DeadReckoningEstimateSwitch.Value);
+        end
+
+        % Value changed function: OOIsSwitch
+        function OOIsSwitchValueChanged(app, event)
+            set(app.GCFPlot.OOI, 'Visible', app.OOIsSwitch.Value);
+        end
+
+        % Value changed function: lidarX
+        function lidarXValueChanged(app, event)
+            value = app.lidarX.Value;
+            app.LidarPlot.initCoords(1) = value;
+        end
+
+        % Value changed function: lidarY
+        function lidarYValueChanged(app, event)
+            value = app.lidarY.Value;
+            
+        end
+
+        % Value changed function: lidarTheta
+        function lidarThetaValueChanged(app, event)
+            value = app.lidarTheta.Value;
+            
         end
     end
 
@@ -473,6 +714,30 @@ classdef interface < matlab.apps.AppBase
             app.StatusGridLayout.Padding = [10 2.8 10 2.8];
             app.StatusGridLayout.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
 
+            % Create CLidarAxes
+            app.CLidarAxes = uiaxes(app.StatusGridLayout);
+            title(app.CLidarAxes, 'LIDAR_1 (Cartesian)')
+            xlabel(app.CLidarAxes, 'X')
+            ylabel(app.CLidarAxes, 'Y')
+            zlabel(app.CLidarAxes, 'Z')
+            app.CLidarAxes.XGrid = 'on';
+            app.CLidarAxes.YGrid = 'on';
+            app.CLidarAxes.Layout.Row = 4;
+            app.CLidarAxes.Layout.Column = [2 3];
+
+            % Create PLidarAxes
+            app.PLidarAxes = uiaxes(app.StatusGridLayout);
+            title(app.PLidarAxes, 'LIDAR_1 (Polar)')
+            xlabel(app.PLidarAxes, 'Azimuth (Degrees)')
+            ylabel(app.PLidarAxes, 'Range (m)')
+            zlabel(app.PLidarAxes, 'Z')
+            app.PLidarAxes.XLim = [-80 80];
+            app.PLidarAxes.YLim = [-10 30];
+            app.PLidarAxes.XGrid = 'on';
+            app.PLidarAxes.YGrid = 'on';
+            app.PLidarAxes.Layout.Row = 3;
+            app.PLidarAxes.Layout.Column = [2 3];
+
             % Create GCFAxes
             app.GCFAxes = uiaxes(app.StatusGridLayout);
             title(app.GCFAxes, 'Global Co-ordinate Frame')
@@ -489,28 +754,6 @@ classdef interface < matlab.apps.AppBase
             app.GCFAxes.YGrid = 'on';
             app.GCFAxes.Layout.Row = 2;
             app.GCFAxes.Layout.Column = 3;
-
-            % Create PLidarAxes
-            app.PLidarAxes = uiaxes(app.StatusGridLayout);
-            title(app.PLidarAxes, 'LIDAR_1 (Polar)')
-            xlabel(app.PLidarAxes, 'X')
-            ylabel(app.PLidarAxes, 'Y')
-            zlabel(app.PLidarAxes, 'Z')
-            app.PLidarAxes.XGrid = 'on';
-            app.PLidarAxes.YGrid = 'on';
-            app.PLidarAxes.Layout.Row = 3;
-            app.PLidarAxes.Layout.Column = [2 3];
-
-            % Create CLidarAxes
-            app.CLidarAxes = uiaxes(app.StatusGridLayout);
-            title(app.CLidarAxes, 'LIDAR_1 (Cartesian)')
-            xlabel(app.CLidarAxes, 'X')
-            ylabel(app.CLidarAxes, 'Y')
-            zlabel(app.CLidarAxes, 'Z')
-            app.CLidarAxes.XGrid = 'on';
-            app.CLidarAxes.YGrid = 'on';
-            app.CLidarAxes.Layout.Row = 4;
-            app.CLidarAxes.Layout.Column = [2 3];
 
             % Create MTRN4010Assignment1ControlCentreLabel
             app.MTRN4010Assignment1ControlCentreLabel = uilabel(app.StatusGridLayout);
@@ -620,7 +863,7 @@ classdef interface < matlab.apps.AppBase
             app.CurrentStatusLabel.FontSize = 18;
             app.CurrentStatusLabel.FontWeight = 'bold';
             app.CurrentStatusLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
-            app.CurrentStatusLabel.Position = [35 78 136 23];
+            app.CurrentStatusLabel.Position = [34 33 136 23];
             app.CurrentStatusLabel.Text = 'Current Status:';
 
             % Create Status
@@ -631,7 +874,19 @@ classdef interface < matlab.apps.AppBase
             app.Status.FontName = 'Lucida Console';
             app.Status.FontSize = 10;
             app.Status.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
-            app.Status.Position = [14 39 175 25];
+            app.Status.Position = [14 3 175 25];
+
+            % Create ProcessStepTimemsEditFieldLabel
+            app.ProcessStepTimemsEditFieldLabel = uilabel(app.ProgramStatusPanel);
+            app.ProcessStepTimemsEditFieldLabel.HorizontalAlignment = 'center';
+            app.ProcessStepTimemsEditFieldLabel.Position = [33 94 136 22];
+            app.ProcessStepTimemsEditFieldLabel.Text = 'Process Step Time (ms):';
+
+            % Create ProcessStep
+            app.ProcessStep = uieditfield(app.ProgramStatusPanel, 'numeric');
+            app.ProcessStep.Editable = 'off';
+            app.ProcessStep.HorizontalAlignment = 'center';
+            app.ProcessStep.Position = [74 64 54 28];
 
             % Create VelocityGaugePanel
             app.VelocityGaugePanel = uipanel(app.StatusGridLayout);
@@ -670,22 +925,21 @@ classdef interface < matlab.apps.AppBase
             app.iVxGauge.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.iVxGauge.Position = [4 260 73 136];
 
-            % Create PlayButton
-            app.PlayButton = uibutton(app.VelocityGaugePanel, 'state');
-            app.PlayButton.ValueChangedFcn = createCallbackFcn(app, @PlayButtonValueChanged, true);
-            app.PlayButton.Icon = fullfile(pathToMLAPP, 'src', 'play.png');
-            app.PlayButton.Text = 'Play';
-            app.PlayButton.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
-            app.PlayButton.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
-            app.PlayButton.Position = [53 54 100 23];
-            app.PlayButton.Value = true;
+            % Create PauseButton
+            app.PauseButton = uibutton(app.VelocityGaugePanel, 'state');
+            app.PauseButton.ValueChangedFcn = createCallbackFcn(app, @PauseButtonValueChanged, true);
+            app.PauseButton.Icon = fullfile(pathToMLAPP, 'src', 'pause.png');
+            app.PauseButton.Text = 'Pause';
+            app.PauseButton.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
+            app.PauseButton.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.PauseButton.Position = [53 54 100 23];
 
-            % Create PausedLabel
-            app.PausedLabel = uilabel(app.VelocityGaugePanel);
-            app.PausedLabel.HorizontalAlignment = 'center';
-            app.PausedLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
-            app.PausedLabel.Position = [79 32 46 22];
-            app.PausedLabel.Text = 'Paused';
+            % Create PlayingLabel
+            app.PlayingLabel = uilabel(app.VelocityGaugePanel);
+            app.PlayingLabel.HorizontalAlignment = 'center';
+            app.PlayingLabel.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.PlayingLabel.Position = [80 32 44 22];
+            app.PlayingLabel.Text = 'Playing';
 
             % Create Button
             app.Button = uibutton(app.VelocityGaugePanel, 'push');
@@ -754,6 +1008,38 @@ classdef interface < matlab.apps.AppBase
             app.XYLabel_2.Position = [85 317 31 22];
             app.XYLabel_2.Text = 'X   Y';
 
+            % Create stepTextAreaLabel
+            app.stepTextAreaLabel = uilabel(app.VelocityGaugePanel);
+            app.stepTextAreaLabel.HorizontalAlignment = 'center';
+            app.stepTextAreaLabel.FontWeight = 'bold';
+            app.stepTextAreaLabel.Interpreter = 'latex';
+            app.stepTextAreaLabel.Position = [165 211 30 22];
+            app.stepTextAreaLabel.Text = 'step';
+
+            % Create step
+            app.step = uitextarea(app.VelocityGaugePanel);
+            app.step.Editable = 'off';
+            app.step.HorizontalAlignment = 'center';
+            app.step.FontSize = 10;
+            app.step.FontWeight = 'bold';
+            app.step.Position = [155 182 46 25];
+
+            % Create t
+            app.t = uitextarea(app.VelocityGaugePanel);
+            app.t.Editable = 'off';
+            app.t.HorizontalAlignment = 'center';
+            app.t.FontSize = 10;
+            app.t.FontWeight = 'bold';
+            app.t.Position = [4 182 53 25];
+
+            % Create tTextArea_2Label
+            app.tTextArea_2Label = uilabel(app.VelocityGaugePanel);
+            app.tTextArea_2Label.HorizontalAlignment = 'center';
+            app.tTextArea_2Label.FontWeight = 'bold';
+            app.tTextArea_2Label.Interpreter = 'latex';
+            app.tTextArea_2Label.Position = [16 211 25 22];
+            app.tTextArea_2Label.Text = 't';
+
             % Create visibilityControl
             app.visibilityControl = uipanel(app.StatusGridLayout);
             app.visibilityControl.BorderType = 'none';
@@ -774,7 +1060,7 @@ classdef interface < matlab.apps.AppBase
             % Create PositionIndicatorSwitch
             app.PositionIndicatorSwitch = uiswitch(app.visibilityControl, 'slider');
             app.PositionIndicatorSwitch.ItemsData = {'off', 'on'};
-            app.PositionIndicatorSwitch.ValueChangedFcn = createCallbackFcn(app, @UpdateVis, true);
+            app.PositionIndicatorSwitch.ValueChangedFcn = createCallbackFcn(app, @PositionIndicatorSwitchValueChanged, true);
             app.PositionIndicatorSwitch.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.PositionIndicatorSwitch.Position = [113 274 45 20];
             app.PositionIndicatorSwitch.Value = 'on';
@@ -789,7 +1075,7 @@ classdef interface < matlab.apps.AppBase
             % Create GroundTruthSwitch
             app.GroundTruthSwitch = uiswitch(app.visibilityControl, 'slider');
             app.GroundTruthSwitch.ItemsData = {'off', 'on'};
-            app.GroundTruthSwitch.ValueChangedFcn = createCallbackFcn(app, @UpdateVis, true);
+            app.GroundTruthSwitch.ValueChangedFcn = createCallbackFcn(app, @GroundTruthSwitchValueChanged, true);
             app.GroundTruthSwitch.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.GroundTruthSwitch.Position = [113 197 45 20];
             app.GroundTruthSwitch.Value = 'on';
@@ -805,7 +1091,7 @@ classdef interface < matlab.apps.AppBase
             % Create DeadReckoningEstimateSwitch
             app.DeadReckoningEstimateSwitch = uiswitch(app.visibilityControl, 'slider');
             app.DeadReckoningEstimateSwitch.ItemsData = {'off', 'on'};
-            app.DeadReckoningEstimateSwitch.ValueChangedFcn = createCallbackFcn(app, @UpdateVis, true);
+            app.DeadReckoningEstimateSwitch.ValueChangedFcn = createCallbackFcn(app, @DeadReckoningEstimateSwitchValueChanged, true);
             app.DeadReckoningEstimateSwitch.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.DeadReckoningEstimateSwitch.Position = [113 120 45 20];
             app.DeadReckoningEstimateSwitch.Value = 'on';
@@ -820,7 +1106,7 @@ classdef interface < matlab.apps.AppBase
             % Create OOIsSwitch
             app.OOIsSwitch = uiswitch(app.visibilityControl, 'slider');
             app.OOIsSwitch.ItemsData = {'off', 'on'};
-            app.OOIsSwitch.ValueChangedFcn = createCallbackFcn(app, @UpdateVis, true);
+            app.OOIsSwitch.ValueChangedFcn = createCallbackFcn(app, @OOIsSwitchValueChanged, true);
             app.OOIsSwitch.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.OOIsSwitch.Position = [113 44 45 20];
             app.OOIsSwitch.Value = 'on';
@@ -909,6 +1195,7 @@ classdef interface < matlab.apps.AppBase
 
             % Create ActiveFileDropDown
             app.ActiveFileDropDown = uidropdown(app.Panel_2);
+            app.ActiveFileDropDown.ValueChangedFcn = createCallbackFcn(app, @ActiveFileDropDownValueChanged, true);
             app.ActiveFileDropDown.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.ActiveFileDropDown.BackgroundColor = [0.96078431372549 0.96078431372549 0.96078431372549];
             app.ActiveFileDropDown.Position = [29 92 297 22];
@@ -1040,13 +1327,11 @@ classdef interface < matlab.apps.AppBase
 
             % Create initX
             app.initX = uieditfield(app.ParamGridLayout, 'numeric');
-            app.initX.AllowEmpty = 'on';
             app.initX.ValueChangedFcn = createCallbackFcn(app, @initXValueChanged, true);
             app.initX.HorizontalAlignment = 'center';
             app.initX.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.initX.Layout.Row = 3;
             app.initX.Layout.Column = 2;
-            app.initX.Value = [];
 
             % Create thetaEditFieldLabel
             app.thetaEditFieldLabel = uilabel(app.ParamGridLayout);
@@ -1061,13 +1346,11 @@ classdef interface < matlab.apps.AppBase
 
             % Create initTheta
             app.initTheta = uieditfield(app.ParamGridLayout, 'numeric');
-            app.initTheta.AllowEmpty = 'on';
             app.initTheta.ValueChangedFcn = createCallbackFcn(app, @initThetaValueChanged, true);
             app.initTheta.HorizontalAlignment = 'center';
             app.initTheta.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.initTheta.Layout.Row = 3;
             app.initTheta.Layout.Column = 6;
-            app.initTheta.Value = [];
 
             % Create YEditFieldLabel
             app.YEditFieldLabel = uilabel(app.ParamGridLayout);
@@ -1081,13 +1364,11 @@ classdef interface < matlab.apps.AppBase
 
             % Create initY
             app.initY = uieditfield(app.ParamGridLayout, 'numeric');
-            app.initY.AllowEmpty = 'on';
             app.initY.ValueChangedFcn = createCallbackFcn(app, @initYValueChanged, true);
             app.initY.HorizontalAlignment = 'center';
             app.initY.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
             app.initY.Layout.Row = 3;
             app.initY.Layout.Column = 4;
-            app.initY.Value = [];
 
             % Create ParameterDisplay
             app.ParameterDisplay = uipanel(app.ParamGridLayout);
@@ -1134,10 +1415,115 @@ classdef interface < matlab.apps.AppBase
             app.CurrentBias = uitreenode(app.IMUBiasNode);
             app.CurrentBias.Text = 'Node';
 
-            % Create ApplyParametersandRunSimulationButton
-            app.ApplyParametersandRunSimulationButton = uibutton(app.ParameterDisplay, 'push');
-            app.ApplyParametersandRunSimulationButton.Position = [55 57 219 47];
-            app.ApplyParametersandRunSimulationButton.Text = 'Apply Parameters and Run Simulation';
+            % Create applyAndRun
+            app.applyAndRun = uibutton(app.ParameterDisplay, 'push');
+            app.applyAndRun.ButtonPushedFcn = createCallbackFcn(app, @applyAndRunPushed, true);
+            app.applyAndRun.Position = [55 57 219 47];
+            app.applyAndRun.Text = 'Apply Parameters and Run Simulation';
+
+            % Create ResetParamsButton
+            app.ResetParamsButton = uibutton(app.ParameterDisplay, 'push');
+            app.ResetParamsButton.ButtonPushedFcn = createCallbackFcn(app, @ResetParamsButtonPushed, true);
+            app.ResetParamsButton.Enable = 'off';
+            app.ResetParamsButton.Position = [55 115 219 47];
+            app.ResetParamsButton.Text = 'Reset Parameters';
+
+            % Create Panel_8
+            app.Panel_8 = uipanel(app.ParamGridLayout);
+            app.Panel_8.Layout.Row = 2;
+            app.Panel_8.Layout.Column = 9;
+
+            % Create LidarInitialPositionLabel
+            app.LidarInitialPositionLabel = uilabel(app.Panel_8);
+            app.LidarInitialPositionLabel.HorizontalAlignment = 'center';
+            app.LidarInitialPositionLabel.FontSize = 18;
+            app.LidarInitialPositionLabel.FontWeight = 'bold';
+            app.LidarInitialPositionLabel.Position = [90 203 177 23];
+            app.LidarInitialPositionLabel.Text = 'Lidar Initial Position';
+
+            % Create relativetoplatformcoordinatesystemLabel
+            app.relativetoplatformcoordinatesystemLabel = uilabel(app.Panel_8);
+            app.relativetoplatformcoordinatesystemLabel.HorizontalAlignment = 'center';
+            app.relativetoplatformcoordinatesystemLabel.FontSize = 10;
+            app.relativetoplatformcoordinatesystemLabel.FontWeight = 'bold';
+            app.relativetoplatformcoordinatesystemLabel.Position = [78 178 197 22];
+            app.relativetoplatformcoordinatesystemLabel.Text = '(relative to platform co-ordinate system)';
+
+            % Create Image
+            app.Image = uiimage(app.Panel_8);
+            app.Image.Position = [3 -9 345 195];
+            app.Image.ImageSource = fullfile(pathToMLAPP, 'src', 'annotatedModel2.png');
+
+            % Create lidarConfigPanel
+            app.lidarConfigPanel = uipanel(app.ParamGridLayout);
+            app.lidarConfigPanel.BorderType = 'none';
+            app.lidarConfigPanel.Layout.Row = [3 4];
+            app.lidarConfigPanel.Layout.Column = 9;
+
+            % Create degRadSelector
+            app.degRadSelector = uiswitch(app.lidarConfigPanel, 'rocker');
+            app.degRadSelector.Items = {'r', 'd'};
+            app.degRadSelector.FontSize = 8;
+            app.degRadSelector.FontColor = [0.902 0.902 0.902];
+            app.degRadSelector.Position = [298 9 20 45];
+            app.degRadSelector.Value = 'r';
+
+            % Create XEditFieldLabel_2
+            app.XEditFieldLabel_2 = uilabel(app.lidarConfigPanel);
+            app.XEditFieldLabel_2.HorizontalAlignment = 'center';
+            app.XEditFieldLabel_2.FontWeight = 'bold';
+            app.XEditFieldLabel_2.FontAngle = 'italic';
+            app.XEditFieldLabel_2.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.XEditFieldLabel_2.Position = [9 0 70 20];
+            app.XEditFieldLabel_2.Text = 'X';
+
+            % Create lidarX
+            app.lidarX = uieditfield(app.lidarConfigPanel, 'numeric');
+            app.lidarX.ValueChangedFcn = createCallbackFcn(app, @lidarXValueChanged, true);
+            app.lidarX.HorizontalAlignment = 'center';
+            app.lidarX.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.lidarX.Position = [9 30 70 25];
+
+            % Create thetaEditFieldLabel_2
+            app.thetaEditFieldLabel_2 = uilabel(app.lidarConfigPanel);
+            app.thetaEditFieldLabel_2.HorizontalAlignment = 'center';
+            app.thetaEditFieldLabel_2.FontWeight = 'bold';
+            app.thetaEditFieldLabel_2.FontAngle = 'italic';
+            app.thetaEditFieldLabel_2.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.thetaEditFieldLabel_2.Interpreter = 'latex';
+            app.thetaEditFieldLabel_2.Position = [213 1 70 20];
+            app.thetaEditFieldLabel_2.Text = '\theta';
+
+            % Create lidarTheta
+            app.lidarTheta = uieditfield(app.lidarConfigPanel, 'numeric');
+            app.lidarTheta.ValueChangedFcn = createCallbackFcn(app, @lidarThetaValueChanged, true);
+            app.lidarTheta.HorizontalAlignment = 'center';
+            app.lidarTheta.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.lidarTheta.Position = [213 31 70 25];
+
+            % Create YEditFieldLabel_2
+            app.YEditFieldLabel_2 = uilabel(app.lidarConfigPanel);
+            app.YEditFieldLabel_2.HorizontalAlignment = 'center';
+            app.YEditFieldLabel_2.FontWeight = 'bold';
+            app.YEditFieldLabel_2.FontAngle = 'italic';
+            app.YEditFieldLabel_2.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.YEditFieldLabel_2.Position = [113 1 70 20];
+            app.YEditFieldLabel_2.Text = 'Y';
+
+            % Create lidarY
+            app.lidarY = uieditfield(app.lidarConfigPanel, 'numeric');
+            app.lidarY.ValueChangedFcn = createCallbackFcn(app, @lidarYValueChanged, true);
+            app.lidarY.HorizontalAlignment = 'center';
+            app.lidarY.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.lidarY.Position = [113 31 70 25];
+
+            % Create degreeradsLabel_2
+            app.degreeradsLabel_2 = uilabel(app.lidarConfigPanel);
+            app.degreeradsLabel_2.WordWrap = 'on';
+            app.degreeradsLabel_2.FontColor = [0.129411764705882 0.129411764705882 0.129411764705882];
+            app.degreeradsLabel_2.Interpreter = 'latex';
+            app.degreeradsLabel_2.Position = [323 11 25 34];
+            app.degreeradsLabel_2.Text = {'\degree'; 'rads'};
 
             % Show the figure after all components are created
             app.MTRN4010ControlCentreUIFigure.Visible = 'on';
