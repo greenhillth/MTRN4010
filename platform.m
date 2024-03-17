@@ -171,7 +171,7 @@ classdef platform < handle
             %update current position
             obj.lidarIndex = obj.lidarIndex + 1;
             computedVal = platform.predictPose([obj.readTime(2);eventData.t],...
-             obj.positionRegister(1:3, obj.index), obj.imuReading, obj.kinematicModel)
+             obj.positionRegister(1:3, obj.index), obj.imuReading, obj.kinematicModel);
             obj.currentPose = computedVal(1:3);
 
             % get range and intensities of both lidars
@@ -179,7 +179,7 @@ classdef platform < handle
             [dist, intensity] = platform.scanToRI(eventData.d');
 
             %convert to cartesian
-            [x, y] = pol2cart([theta;theta], dist)
+            [x, y] = pol2cart([theta;theta], dist);
 
 
             % apply cluster analysis to get OOIs
@@ -195,24 +195,26 @@ classdef platform < handle
             ooi2P = [clust2(:,3), clust2(:,2)]';
 
             if ~(isempty(ooi1P))
-            [xL, yL] = pol2cart(deg2rad(ooi1P(1,:)), ooi1P(2,:))
-            ooi1C = [xL;yL];
+                [xL, yL] = pol2cart(deg2rad(ooi1P(1,:)), ooi1P(2,:));
+                ooi1C = [xL;yL];
             else
-            ooi1C= single.empty(2,0);
+                ooi1C= single.empty(2,0);
             end
 
             if ~(isempty(ooi2P))
-            [xL, yL] = pol2cart(deg2rad(ooi2P(1,:)), ooi2P(2,:))
+                [xL, yL] = pol2cart(deg2rad(ooi2P(1,:)), ooi2P(2,:));
             ooi2C = [xL;yL];
             else
-            ooi2C= single.empty(2,0);
+                ooi2C= single.empty(2,0);
             end
+
+            
+            
 
             %transform lidar data to GCF
             scansCart = [x(1,:); y(1,:); x(2,:); y(2,:)];
-            [L1G, L2G, O1G, O2G] = obj.lidarsToGCF(scansCart, ooi1C, ooi2C)
-
-            ooiG = cat(2, O1G,O2G);
+            [L1G, L2G, O1G, O2G] = obj.lidarsToGCF(scansCart, ooi1C, ooi2C);
+            obj.addScannedOOI(cat(2,O1G, O2G));
 
             
 
@@ -231,7 +233,7 @@ classdef platform < handle
 
 
 
-             obj.updatePlot(computedVal, Lvecs, ooi1P, ooi1C, ooiG);
+             obj.updatePlot(computedVal, Lvecs, ooi1P, ooi1C, obj.scannedOOIs);
             % update lidar time
             obj.readTime(1) = eventData.t;
         end
@@ -279,6 +281,32 @@ classdef platform < handle
             % update imu read time
             obj.readTime(2) = eventData.t;
 
+        end
+
+        function added = addScannedOOI(obj, scan)
+            arguments
+                obj
+                scan (2,:) double
+            end
+            
+            dist = pdist2(obj.scannedOOIs', scan', 'fasteuclidean');
+            
+            tol = 0.1;
+            [regIndex, pointIndex] = find(dist<tol);
+           
+            if ~(isempty(pointIndex)) %if corresponding index found
+                nonMatching = setdiff(1:size(scan, 2), pointIndex');
+                
+                %overwrite existing
+                obj.scannedOOIs(:,regIndex) = scan(:,pointIndex);
+                %append non-matching
+                obj.scannedOOIs = cat(2, obj.scannedOOIs, scan(:, nonMatching));
+                added = true;
+            else
+                obj.scannedOOIs = cat(2, obj.scannedOOIs, scan);
+                added = false;
+            end
+            balls = obj.scannedOOIs
         end
 
         function f = initialiseMenu(obj)
